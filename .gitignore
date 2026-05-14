@@ -1,0 +1,35 @@
+# === Internal-only (never publish) ===
+CLAUDE.md
+.claude/
+_internal/
+scratch/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# === Training artifacts ===
+logs/
+checkpoints/
+wandb/
+*.zip
+*.pt
+
+# === Results — keep only curated finals ===
+results/raw/
+results/scratch/
+
+# === OS / editor ===
+.DS_Store
+.vscode/
+.idea/
+
+# === Submodule cache ===
+assets/mujoco_menagerie/.git
