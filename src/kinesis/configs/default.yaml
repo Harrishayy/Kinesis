@@ -4,11 +4,23 @@
 env:
   control_hz: 50
   max_steps: 500
+  max_delta_rad: 0.0873  # ~5 degrees per control step
+  reset_noise_rad: 0.02
+  lookahead_n: 4
+  lookahead_dt_s: 0.1
+  # Solved by scripts/find_home_pose.py — places the hand at
+  # (0.531, 0.010, 0.407), 3.3 cm from the trajectory center.
+  home_qpos: [0.257813, 0.163813, -0.335467, -1.865636, 0.389176, 1.429329, -0.965127]
 
 trajectory:
   kind: circle
   period_s: 4.0
   radius_m: 0.15
+  center_xyz: [0.5, 0.0, 0.4]
+
+wrappers:
+  obs_noise_sigma_m: 0.02
+  action_delay_steps: 2
 
 reward:
   w_track: 10.0
