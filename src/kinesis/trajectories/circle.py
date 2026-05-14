@@ -1,11 +1,4 @@
-"""Parametric Cartesian trajectories for the end-effector to track.
-
-A trajectory exposes:
-- `target(t)`: 3D position at time `t` (seconds).
-- `lookahead(t, n, dt)`: stacked positions at `t + dt, t + 2*dt, ..., t + n*dt`.
-- `phase(t)`: (sin, cos) of the trajectory phase, exposed to the policy so it
-  is stateless w.r.t. which trajectory instance it is tracking.
-"""
+"""Circle in the y-z plane at fixed x."""
 
 from __future__ import annotations
 
@@ -16,8 +9,6 @@ import numpy as np
 
 @dataclass(frozen=True)
 class CircleTrajectory:
-    """Circle in the y-z plane at fixed x, centered on `center`."""
-
     center: np.ndarray  # (3,)
     radius: float
     period_s: float
@@ -36,7 +27,6 @@ class CircleTrajectory:
         )
 
     def lookahead(self, t: float, n: int, dt: float) -> np.ndarray:
-        """Stacked future targets, shape (n, 3)."""
         ts = t + dt * np.arange(1, n + 1)
         a = self._angle(ts)
         out = np.zeros((n, 3), dtype=np.float64)

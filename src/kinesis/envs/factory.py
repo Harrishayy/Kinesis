@@ -14,11 +14,24 @@ import yaml
 from kinesis.envs.panda_track import PandaTrackConfig, PandaTrackEnv
 from kinesis.envs.wrappers import ActionDelayWrapper, ObsNoiseWrapper
 
-_DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "default.yaml"
+CONFIGS_DIR = Path(__file__).resolve().parents[1] / "configs"
+_DEFAULT_CONFIG = CONFIGS_DIR / "circle.yaml"
 
 
 def load_config(path: str | Path | None = None) -> dict:
-    with open(path or _DEFAULT_CONFIG) as f:
+    """Load a YAML config.
+
+    `path` may be an absolute/relative file path, or a bare trajectory name
+    such as ``"circle"`` / ``"figure8_3d"`` resolved to ``configs/<name>.yaml``.
+    """
+    if path is None:
+        path = _DEFAULT_CONFIG
+    else:
+        p = Path(path)
+        if not p.exists() and not p.suffix:
+            p = CONFIGS_DIR / f"{p.name}.yaml"
+        path = p
+    with open(path) as f:
         return yaml.safe_load(f)
 
 
@@ -26,6 +39,7 @@ def _panda_config(cfg: dict) -> PandaTrackConfig:
     env_c = cfg.get("env", {})
     traj_c = cfg.get("trajectory", {})
     rew_c = cfg.get("reward", {})
+    defaults = PandaTrackConfig()
     return PandaTrackConfig(
         control_hz=float(env_c.get("control_hz", 50.0)),
         max_steps=int(env_c.get("max_steps", 500)),
@@ -33,10 +47,14 @@ def _panda_config(cfg: dict) -> PandaTrackConfig:
         reset_noise_rad=float(env_c.get("reset_noise_rad", 0.02)),
         lookahead_n=int(env_c.get("lookahead_n", 4)),
         lookahead_dt_s=float(env_c.get("lookahead_dt_s", 0.1)),
-        home_qpos=tuple(env_c.get("home_qpos", PandaTrackConfig().home_qpos)),
+        home_qpos=tuple(env_c.get("home_qpos", defaults.home_qpos)),
+        trajectory_kind=str(traj_c.get("kind", "circle")),
         trajectory_period_s=float(traj_c.get("period_s", 4.0)),
-        trajectory_radius_m=float(traj_c.get("radius_m", 0.15)),
         trajectory_center_xyz=tuple(traj_c.get("center_xyz", (0.5, 0.0, 0.4))),
+        trajectory_radius_m=float(traj_c.get("radius_m", defaults.trajectory_radius_m)),
+        trajectory_amp_x_m=float(traj_c.get("amp_x_m", defaults.trajectory_amp_x_m)),
+        trajectory_amp_y_m=float(traj_c.get("amp_y_m", defaults.trajectory_amp_y_m)),
+        trajectory_amp_z_m=float(traj_c.get("amp_z_m", defaults.trajectory_amp_z_m)),
         w_track=float(rew_c.get("w_track", 10.0)),
         w_action_rate=float(rew_c.get("w_action_rate", 0.1)),
         w_qdot=float(rew_c.get("w_qdot", 0.001)),

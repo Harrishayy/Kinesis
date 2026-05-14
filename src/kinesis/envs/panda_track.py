@@ -19,7 +19,7 @@ import mujoco
 import numpy as np
 from gymnasium import spaces
 
-from kinesis.utils.trajectory import CircleTrajectory
+from kinesis.trajectories import Trajectory, build_trajectory
 
 _DEFAULT_SCENE = (
     Path(__file__).resolve().parents[3]
@@ -49,9 +49,15 @@ class PandaTrackConfig:
         1.429329,
         -0.965127,
     )
+    trajectory_kind: str = "circle"
     trajectory_period_s: float = 4.0
-    trajectory_radius_m: float = 0.15
     trajectory_center_xyz: tuple[float, float, float] = (0.5, 0.0, 0.4)
+    # Circle-only:
+    trajectory_radius_m: float = 0.15
+    # Figure8_3D-only:
+    trajectory_amp_x_m: float = 0.10
+    trajectory_amp_y_m: float = 0.15
+    trajectory_amp_z_m: float = 0.10
     # Reward weights (see CLAUDE.md). Keep prior values in comments when tuning.
     w_track: float = 10.0
     w_action_rate: float = 0.1
@@ -83,10 +89,16 @@ class PandaTrackEnv(gym.Env):
             )
         self.n_substeps = n_substeps
 
-        self.trajectory = CircleTrajectory(
-            center=np.asarray(self.cfg.trajectory_center_xyz, dtype=np.float64),
-            radius=self.cfg.trajectory_radius_m,
-            period_s=self.cfg.trajectory_period_s,
+        center = np.asarray(self.cfg.trajectory_center_xyz, dtype=np.float64)
+        traj_params: dict[str, float] = {"period_s": self.cfg.trajectory_period_s}
+        if self.cfg.trajectory_kind == "circle":
+            traj_params["radius_m"] = self.cfg.trajectory_radius_m
+        elif self.cfg.trajectory_kind == "figure8_3d":
+            traj_params["amp_x_m"] = self.cfg.trajectory_amp_x_m
+            traj_params["amp_y_m"] = self.cfg.trajectory_amp_y_m
+            traj_params["amp_z_m"] = self.cfg.trajectory_amp_z_m
+        self.trajectory: Trajectory = build_trajectory(
+            self.cfg.trajectory_kind, center, **traj_params
         )
 
         joint_lo, joint_hi = self._joint_limits()

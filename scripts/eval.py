@@ -1,14 +1,16 @@
 """Deterministic evaluation of a trained Kinesis PPO policy.
 
-Outputs:
-- results/plots/yz_trace.png        — target vs achieved EE trace (y-z plane)
-- results/plots/error_vs_time.png   — tracking error magnitude vs time
-- results/videos/rollout.mp4        — offscreen-rendered rollout video
+Outputs (under per-trajectory subdirectories):
+- results/plots/<traj>/yz_trace.png        — target vs achieved EE (y-z plane)
+- results/plots/<traj>/xz_trace.png        — only for 3D trajectories
+- results/plots/<traj>/error_vs_time.png   — tracking error magnitude vs time
+- results/videos/<traj>/rollout.mp4        — offscreen-rendered rollout video
 - prints a one-line metric summary (RMS / max / jerk)
 
 Usage:
     uv run python scripts/eval.py
-    uv run python scripts/eval.py --checkpoint checkpoints/best/best_model.zip
+    uv run python scripts/eval.py --config figure8_3d
+    uv run python scripts/eval.py --checkpoint checkpoints/circle/best/best_model.zip
 """
 
 from __future__ import annotations
@@ -30,8 +32,6 @@ from kinesis.envs.panda_track import PandaTrackEnv  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 RESULTS = REPO / "results"
-PLOTS = RESULTS / "plots"
-VIDEOS = RESULTS / "videos"
 
 VIDEO_WIDTH = 640
 VIDEO_HEIGHT = 480
@@ -110,22 +110,36 @@ def metrics(
     }
 
 
-def plot_yz_trace(traces: dict[str, np.ndarray], path: Path) -> None:
+def _plot_projection(
+    traces: dict[str, np.ndarray],
+    path: Path,
+    axes: tuple[int, int],
+    labels: tuple[str, str],
+) -> None:
     ee = traces["ee_pos"]
     tg = traces["target"]
+    a, b = axes
     fig, ax = plt.subplots(figsize=(5, 5))
-    ax.plot(tg[:, 1], tg[:, 2], label="target", linewidth=2, alpha=0.6)
-    ax.plot(ee[:, 1], ee[:, 2], label="achieved", linewidth=1)
-    ax.set_xlabel("y (m)")
-    ax.set_ylabel("z (m)")
+    ax.plot(tg[:, a], tg[:, b], label="target", linewidth=2, alpha=0.6)
+    ax.plot(ee[:, a], ee[:, b], label="achieved", linewidth=1)
+    ax.set_xlabel(f"{labels[0]} (m)")
+    ax.set_ylabel(f"{labels[1]} (m)")
     ax.set_aspect("equal")
     ax.grid(True, alpha=0.3)
     ax.legend()
-    ax.set_title("End-effector trace (y-z plane)")
+    ax.set_title(f"End-effector trace ({labels[0]}-{labels[1]} plane)")
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=140)
     plt.close(fig)
+
+
+def plot_yz_trace(traces: dict[str, np.ndarray], path: Path) -> None:
+    _plot_projection(traces, path, axes=(1, 2), labels=("y", "z"))
+
+
+def plot_xz_trace(traces: dict[str, np.ndarray], path: Path) -> None:
+    _plot_projection(traces, path, axes=(0, 2), labels=("x", "z"))
 
 
 def plot_error(traces: dict[str, np.ndarray], control_hz: float, path: Path) -> None:
@@ -147,15 +161,24 @@ def plot_error(traces: dict[str, np.ndarray], control_hz: float, path: Path) -> 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default=None, help="trajectory name or YAML path")
     parser.add_argument(
         "--checkpoint",
-        default=str(REPO / "checkpoints" / "ppo_panda_final.zip"),
+        default=None,
+        help="defaults to checkpoints/<traj>/ppo_panda_final.zip",
     )
     parser.add_argument("--periods", type=float, default=3.0)
     parser.add_argument("--no-video", action="store_true")
     args = parser.parse_args()
 
-    cfg = load_config()
+    cfg = load_config(args.config)
+    kind = str(cfg.get("trajectory", {}).get("kind", "circle"))
+    plots_dir = RESULTS / "plots" / kind
+    videos_dir = RESULTS / "videos" / kind
+    checkpoint = args.checkpoint or str(
+        REPO / "checkpoints" / kind / "ppo_panda_final.zip"
+    )
+
     env = make_env(cfg, seed=0, apply_wrappers=True)
     panda = _unwrap_to_panda(env)
     control_hz = panda.cfg.control_hz
@@ -164,19 +187,22 @@ def main() -> None:
     # Stay within one episode so we don't get a synthetic mid-rollout transient.
     n_steps = min(n_steps, panda.cfg.max_steps)
 
-    print(f"[eval] checkpoint={args.checkpoint} steps={n_steps}")
-    model = PPO.load(args.checkpoint, env=None, device="cpu")
+    print(f"[eval] traj={kind} checkpoint={checkpoint} steps={n_steps}")
+    model = PPO.load(checkpoint, env=None, device="cpu")
 
     traces = rollout(model, env, n_steps=n_steps)
     m = metrics(traces, control_hz=control_hz)
 
-    PLOTS.mkdir(parents=True, exist_ok=True)
-    plot_yz_trace(traces, PLOTS / "yz_trace.png")
-    plot_error(traces, control_hz, PLOTS / "error_vs_time.png")
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    plot_yz_trace(traces, plots_dir / "yz_trace.png")
+    plot_error(traces, control_hz, plots_dir / "error_vs_time.png")
+    # x is only informative when the trajectory actually moves in depth.
+    if (traces["target"][:, 0].max() - traces["target"][:, 0].min()) > 1e-3:
+        plot_xz_trace(traces, plots_dir / "xz_trace.png")
 
     if not args.no_video:
-        VIDEOS.mkdir(parents=True, exist_ok=True)
-        render_video(env, model, n_steps=n_steps, out_path=VIDEOS / "rollout.mp4")
+        videos_dir.mkdir(parents=True, exist_ok=True)
+        render_video(env, model, n_steps=n_steps, out_path=videos_dir / "rollout.mp4")
 
     print(
         f"[eval] RMS={m['rms_m']*1000:.2f} mm  MAX={m['max_m']*1000:.2f} mm  "

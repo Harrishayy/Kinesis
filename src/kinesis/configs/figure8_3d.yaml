@@ -1,0 +1,46 @@
+# 3D figure-eight tracking configuration.
+#
+# The end-effector traces a Lissajous curve with frequency ratio 2:1 in y:z
+# plus an in-phase depth bob in x. Projected on y-z it is an infinity sign;
+# the depth motion forces shoulder/base joints (1-3) to actively contribute,
+# so all 7 arm joints are engaged. Period stays at 4 s so the per-axis speed
+# is comparable to the circle benchmark.
+
+env:
+  control_hz: 50
+  max_steps: 500
+  max_delta_rad: 0.0873  # ~5 degrees per control step
+  reset_noise_rad: 0.02
+  lookahead_n: 4
+  lookahead_dt_s: 0.1
+  # Same home pose as the circle config — the workspace centre is identical
+  # and the EE starts ~3 cm off-target, which the policy must close.
+  home_qpos: [0.257813, 0.163813, -0.335467, -1.865636, 0.389176, 1.429329, -0.965127]
+
+trajectory:
+  kind: figure8_3d
+  period_s: 4.0
+  center_xyz: [0.5, 0.0, 0.4]
+  amp_x_m: 0.10
+  amp_y_m: 0.15
+  amp_z_m: 0.10
+
+wrappers:
+  obs_noise_sigma_m: 0.02
+  action_delay_steps: 2
+
+reward:
+  w_track: 10.0
+  w_action_rate: 0.1
+  w_qdot: 0.001
+  w_inband: 0.5
+
+ppo:
+  total_timesteps: 2_000_000
+  n_envs: 16
+  learning_rate: 3.0e-4
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95

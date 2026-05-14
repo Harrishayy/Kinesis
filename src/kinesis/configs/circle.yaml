@@ -1,5 +1,5 @@
-# Default training configuration for Kinesis.
-# Fields will be populated as milestones land (env, training, evaluation).
+# Circle-tracking configuration: 15 cm circle in the y-z plane at fixed
+# x = 0.5 m, period 4 s (0.25 Hz).
 
 env:
   control_hz: 50

@@ -1,13 +1,14 @@
 """PPO training for Kinesis.
 
 Usage:
-    uv run python scripts/train.py --smoke              # VecEnv smoke only
-    uv run python scripts/train.py --timesteps 200000   # short pilot
-    uv run python scripts/train.py                      # full run (config-driven)
+    uv run python scripts/train.py --smoke                     # VecEnv smoke only
+    uv run python scripts/train.py --timesteps 200000          # short pilot (circle)
+    uv run python scripts/train.py --config figure8_3d         # train on figure-8
+    uv run python scripts/train.py                             # full circle run
 
-TensorBoard logs to logs/tb/, checkpoints to checkpoints/, best model to
-checkpoints/best/. Console gets a per-rollout summary line including the
-running mean episodic EE-tracking RMS so the pilot can be eyeballed.
+TensorBoard logs to logs/tb/<traj>/, checkpoints to checkpoints/<traj>/, best
+model to checkpoints/<traj>/best/. Console gets a per-rollout summary line
+including the running mean episodic EE-tracking RMS so the pilot can be eyeballed.
 """
 
 from __future__ import annotations
@@ -29,9 +30,13 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMoni
 from kinesis.envs.factory import env_thunk, load_config
 
 REPO = Path(__file__).resolve().parents[1]
-LOG_DIR = REPO / "logs" / "tb"
-CKPT_DIR = REPO / "checkpoints"
-BEST_DIR = CKPT_DIR / "best"
+
+
+def _traj_dirs(cfg: dict) -> tuple[Path, Path, Path]:
+    kind = str(cfg.get("trajectory", {}).get("kind", "circle"))
+    log_dir = REPO / "logs" / "tb" / kind
+    ckpt_dir = REPO / "checkpoints" / kind
+    return log_dir, ckpt_dir, ckpt_dir / "best"
 
 
 def _build_vec(cfg: dict, n_envs: int, use_subproc: bool, seed_base: int = 0):
@@ -91,9 +96,10 @@ def train(cfg: dict, timesteps: int, use_subproc: bool, device: str) -> None:
     ppo_cfg = cfg.get("ppo", {})
     n_envs = int(ppo_cfg.get("n_envs", 16))
 
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    CKPT_DIR.mkdir(parents=True, exist_ok=True)
-    BEST_DIR.mkdir(parents=True, exist_ok=True)
+    log_dir, ckpt_dir, best_dir = _traj_dirs(cfg)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    best_dir.mkdir(parents=True, exist_ok=True)
 
     vec = _build_vec(cfg, n_envs=n_envs, use_subproc=use_subproc, seed_base=0)
     eval_vec = _build_vec(cfg, n_envs=1, use_subproc=False, seed_base=10_000)
@@ -107,7 +113,7 @@ def train(cfg: dict, timesteps: int, use_subproc: bool, device: str) -> None:
         n_epochs=int(ppo_cfg.get("n_epochs", 10)),
         gamma=float(ppo_cfg.get("gamma", 0.99)),
         gae_lambda=float(ppo_cfg.get("gae_lambda", 0.95)),
-        tensorboard_log=str(LOG_DIR),
+        tensorboard_log=str(log_dir),
         verbose=1,
         device=device,
         seed=0,
@@ -118,13 +124,13 @@ def train(cfg: dict, timesteps: int, use_subproc: bool, device: str) -> None:
             TrackingErrorCallback(),
             CheckpointCallback(
                 save_freq=max(200_000 // n_envs, 1),
-                save_path=str(CKPT_DIR),
+                save_path=str(ckpt_dir),
                 name_prefix="ppo_panda",
             ),
             EvalCallback(
                 eval_vec,
-                best_model_save_path=str(BEST_DIR),
-                log_path=str(LOG_DIR / "eval"),
+                best_model_save_path=str(best_dir),
+                log_path=str(log_dir / "eval"),
                 eval_freq=max(50_000 // n_envs, 1),
                 n_eval_episodes=3,
                 deterministic=True,
@@ -144,7 +150,7 @@ def train(cfg: dict, timesteps: int, use_subproc: bool, device: str) -> None:
         vec.close()
         eval_vec.close()
     dt = time.perf_counter() - t0
-    final_path = CKPT_DIR / "ppo_panda_final.zip"
+    final_path = ckpt_dir / "ppo_panda_final.zip"
     model.save(str(final_path))
     print(f"[train] done in {dt:.1f}s — saved {final_path}")
 
@@ -164,9 +170,14 @@ def main() -> None:
         "--dummy", action="store_true", help="Use DummyVecEnv (debug fallback)"
     )
     parser.add_argument("--device", default="cpu", choices=["cpu", "mps", "cuda"])
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="trajectory name (e.g. 'circle', 'figure8_3d') or path to a YAML",
+    )
     args = parser.parse_args()
 
-    cfg = load_config()
+    cfg = load_config(args.config)
     n_envs = args.n_envs or int(cfg.get("ppo", {}).get("n_envs", 16))
 
     if args.smoke:
