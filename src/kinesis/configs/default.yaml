@@ -10,6 +10,11 @@ env:
   lookahead_dt_s: 0.1
   # Solved by scripts/find_home_pose.py — places the hand at
   # (0.531, 0.010, 0.407), 3.3 cm from the trajectory center.
+  # An "on-trajectory" pose was tried earlier but placed joint 4 too close to
+  # its limit (-1.47 vs limit -0.07), which collapsed manipulability and caused
+  # late-episode drift. The centered pose has more headroom in joint space; the
+  # startup transient from home → first target is handled in the eval metric
+  # by reporting steady-state RMS separately.
   home_qpos: [0.257813, 0.163813, -0.335467, -1.865636, 0.389176, 1.429329, -0.965127]
 
 trajectory:

@@ -4,32 +4,31 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
 
-Reinforcement-learning end-effector trajectory tracking for the **Franka Emika Panda** in MuJoCo. The policy learns to follow time-varying Cartesian paths (circles, figure-eights, lissajous, moving targets) under observation noise and control delay.
+Reinforcement-learning end-effector trajectory tracking for the **Franka Emika Panda** in MuJoCo. A PPO policy follows a smooth Cartesian reference (circle, 15 cm radius at 0.25 Hz) under observation noise and control delay.
 
-> _Status: scaffold — environment, training, and evaluation land in subsequent milestones._
-
-<!-- Headline media: replace with final video / GIF after M5. -->
 <p align="center">
-  <em>tracking demo video — coming soon</em>
+  <img src="results/plots/yz_trace.png" width="320"/>
+  <img src="results/plots/error_vs_time.png" width="480"/>
 </p>
+
+**Result:** 5.5 mm steady-state RMS, 11.9 mm max — well under the 1 cm target — at 0.25 Hz on a 15 cm circle, under ±2 cm observation noise and 2-step control delay. Trained in ~7 min on a MacBook Pro M5 Pro (CPU).
 
 ---
 
 ## Quickstart
 
 ```bash
-git clone --recurse-submodules https://github.com/Harrishayy/Kinesis.git
+git clone https://github.com/Harrishayy/Kinesis.git
 cd Kinesis
-make setup     # uv venv + editable install + submodules + pre-commit
-make smoke     # 10k-step PPO sanity check (available after M1)
+make setup           # uv venv + editable install + pre-commit
+make test            # run the test suite (should print 18 passed)
+make smoke           # 200-step SubprocVecEnv throughput check
+make train           # PPO, 2M steps, ~12 min on M5 Pro (CPU)
+make eval            # plots + MP4 to results/, prints RMS/max/jerk
 ```
 
-Run the full pipeline:
-
-```bash
-make train     # PPO training, logs to TensorBoard
-make eval      # load latest checkpoint, write plots + MP4 to results/
-```
+Open `logs/tb/` in TensorBoard to watch training curves
+(`rollout/ee_error_rms_m`, `eval/mean_reward`).
 
 ## Project structure
 
@@ -38,7 +37,7 @@ make eval      # load latest checkpoint, write plots + MP4 to results/
 ├── src/kinesis/        # Python package (envs, configs, utils)
 ├── tests/              # pytest suite
 ├── scripts/            # public, reproducible entrypoints (smoke, render)
-├── assets/             # mujoco_menagerie (git submodule)
+├── assets/             # vendored mujoco_menagerie Panda assets
 ├── docs/               # design notes and figures
 └── results/            # curated plots and videos
 ```

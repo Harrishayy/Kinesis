@@ -34,7 +34,7 @@ def test_random_rollout_finite(env: PandaTrackEnv) -> None:
         assert "ee_error_m" in info and np.isfinite(info["ee_error_m"])
 
 
-def test_reset_places_ee_near_target_center(env: PandaTrackEnv) -> None:
+def test_reset_places_ee_near_trajectory_center(env: PandaTrackEnv) -> None:
     env.reset(seed=0)
     ee = env._ee_pos()
     center = np.asarray(env.cfg.trajectory_center_xyz)

@@ -1,26 +1,48 @@
-"""PPO training entry point for Kinesis (M5/M6).
+"""PPO training for Kinesis.
 
-For now this only implements the M5 smoke path:
-    uv run python scripts/train.py --smoke
-which builds a SubprocVecEnv with the full wrapper stack, runs 200 random
-steps across all workers, prints throughput, and exits. PPO is wired in M6.
+Usage:
+    uv run python scripts/train.py --smoke              # VecEnv smoke only
+    uv run python scripts/train.py --timesteps 200000   # short pilot
+    uv run python scripts/train.py                      # full run (config-driven)
+
+TensorBoard logs to logs/tb/, checkpoints to checkpoints/, best model to
+checkpoints/best/. Console gets a per-rollout summary line including the
+running mean episodic EE-tracking RMS so the pilot can be eyeballed.
 """
 
 from __future__ import annotations
 
 import argparse
 import time
+from pathlib import Path
 
 import numpy as np
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import (
+    BaseCallback,
+    CallbackList,
+    CheckpointCallback,
+    EvalCallback,
+)
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
 
 from kinesis.envs.factory import env_thunk, load_config
 
+REPO = Path(__file__).resolve().parents[1]
+LOG_DIR = REPO / "logs" / "tb"
+CKPT_DIR = REPO / "checkpoints"
+BEST_DIR = CKPT_DIR / "best"
+
+
+def _build_vec(cfg: dict, n_envs: int, use_subproc: bool, seed_base: int = 0):
+    thunks = [env_thunk(cfg, seed=seed_base + i) for i in range(n_envs)]
+    vec_cls = SubprocVecEnv if (use_subproc and n_envs > 1) else DummyVecEnv
+    vec = vec_cls(thunks)
+    return VecMonitor(vec)
+
 
 def smoke(cfg: dict, n_envs: int, n_steps: int, use_subproc: bool) -> None:
-    thunks = [env_thunk(cfg, seed=i) for i in range(n_envs)]
-    vec_cls = SubprocVecEnv if use_subproc else DummyVecEnv
-    vec = vec_cls(thunks)
+    vec = _build_vec(cfg, n_envs=n_envs, use_subproc=use_subproc)
     try:
         vec.reset()
         rng = np.random.default_rng(0)
@@ -32,7 +54,7 @@ def smoke(cfg: dict, n_envs: int, n_steps: int, use_subproc: bool) -> None:
         dt = time.perf_counter() - t0
         total = n_steps * n_envs
         print(
-            f"vec={vec_cls.__name__} n_envs={n_envs} n_steps={n_steps} "
+            f"vec={type(vec.venv).__name__} n_envs={n_envs} n_steps={n_steps} "
             f"wall={dt:.2f}s total_env_steps={total} "
             f"throughput={total / dt:.0f} env-steps/s"
         )
@@ -40,14 +62,108 @@ def smoke(cfg: dict, n_envs: int, n_steps: int, use_subproc: bool) -> None:
         vec.close()
 
 
+class TrackingErrorCallback(BaseCallback):
+    """Logs the rolling mean per-step EE tracking error to TensorBoard."""
+
+    def __init__(self, window: int = 2048) -> None:
+        super().__init__()
+        self._buf: list[float] = []
+        self._window = window
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos") or []
+        for info in infos:
+            err = info.get("ee_error_m")
+            if err is not None:
+                self._buf.append(float(err))
+                if len(self._buf) > self._window:
+                    self._buf = self._buf[-self._window :]
+        if self._buf and self.num_timesteps % 2048 == 0:
+            arr = np.asarray(self._buf)
+            self.logger.record("rollout/ee_error_mean_m", float(arr.mean()))
+            self.logger.record(
+                "rollout/ee_error_rms_m", float(np.sqrt((arr**2).mean()))
+            )
+        return True
+
+
+def train(cfg: dict, timesteps: int, use_subproc: bool, device: str) -> None:
+    ppo_cfg = cfg.get("ppo", {})
+    n_envs = int(ppo_cfg.get("n_envs", 16))
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    CKPT_DIR.mkdir(parents=True, exist_ok=True)
+    BEST_DIR.mkdir(parents=True, exist_ok=True)
+
+    vec = _build_vec(cfg, n_envs=n_envs, use_subproc=use_subproc, seed_base=0)
+    eval_vec = _build_vec(cfg, n_envs=1, use_subproc=False, seed_base=10_000)
+
+    model = PPO(
+        policy="MlpPolicy",
+        env=vec,
+        learning_rate=float(ppo_cfg.get("learning_rate", 3e-4)),
+        n_steps=int(ppo_cfg.get("n_steps", 2048)),
+        batch_size=int(ppo_cfg.get("batch_size", 64)),
+        n_epochs=int(ppo_cfg.get("n_epochs", 10)),
+        gamma=float(ppo_cfg.get("gamma", 0.99)),
+        gae_lambda=float(ppo_cfg.get("gae_lambda", 0.95)),
+        tensorboard_log=str(LOG_DIR),
+        verbose=1,
+        device=device,
+        seed=0,
+    )
+
+    callbacks = CallbackList(
+        [
+            TrackingErrorCallback(),
+            CheckpointCallback(
+                save_freq=max(200_000 // n_envs, 1),
+                save_path=str(CKPT_DIR),
+                name_prefix="ppo_panda",
+            ),
+            EvalCallback(
+                eval_vec,
+                best_model_save_path=str(BEST_DIR),
+                log_path=str(LOG_DIR / "eval"),
+                eval_freq=max(50_000 // n_envs, 1),
+                n_eval_episodes=3,
+                deterministic=True,
+                render=False,
+            ),
+        ]
+    )
+
+    print(
+        f"[train] timesteps={timesteps} n_envs={n_envs} device={device} "
+        f"vec={type(vec.venv).__name__}"
+    )
+    t0 = time.perf_counter()
+    try:
+        model.learn(total_timesteps=timesteps, callback=callbacks, progress_bar=False)
+    finally:
+        vec.close()
+        eval_vec.close()
+    dt = time.perf_counter() - t0
+    final_path = CKPT_DIR / "ppo_panda_final.zip"
+    model.save(str(final_path))
+    print(f"[train] done in {dt:.1f}s — saved {final_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke", action="store_true", help="VecEnv smoke test only")
+    parser.add_argument(
+        "--timesteps",
+        type=int,
+        default=None,
+        help="override ppo.total_timesteps from config",
+    )
     parser.add_argument("--n-envs", type=int, default=None)
-    parser.add_argument("--n-steps", type=int, default=200)
+    parser.add_argument("--n-steps", type=int, default=200, help="smoke: steps per env")
     parser.add_argument(
         "--dummy", action="store_true", help="Use DummyVecEnv (debug fallback)"
     )
+    parser.add_argument("--device", default="cpu", choices=["cpu", "mps", "cuda"])
     args = parser.parse_args()
 
     cfg = load_config()
@@ -57,7 +173,8 @@ def main() -> None:
         smoke(cfg, n_envs=n_envs, n_steps=args.n_steps, use_subproc=not args.dummy)
         return
 
-    raise SystemExit("PPO training arrives in M6. Use --smoke for now.")
+    timesteps = args.timesteps or int(cfg.get("ppo", {}).get("total_timesteps", 2_000_000))
+    train(cfg, timesteps=timesteps, use_subproc=not args.dummy, device=args.device)
 
 
 if __name__ == "__main__":

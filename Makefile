@@ -7,13 +7,13 @@ setup:
 	pre-commit install
 
 smoke:
-	python scripts/quick_smoke.py
+	python scripts/train.py --smoke
 
 train:
-	python -m kinesis.train --config src/kinesis/configs/default.yaml
+	python scripts/train.py
 
 eval:
-	python -m kinesis.evaluate --checkpoint checkpoints/latest.zip
+	python scripts/eval.py
 
 test:
 	pytest -q
