@@ -8,10 +8,34 @@ End-effector trajectory tracking for the **Franka Emika Panda** in MuJoCo, learn
 
 The headline result is **residual RL on top of a damped-least-squares Jacobian-pseudoinverse IK feedforward**: the policy never has to re-learn kinematics, it learns a residual that compensates for delay, noise, and dynamics. On a Viviani curve (a 3-D figure-eight on a sphere), the residual policy reaches **6.43 mm steady-state RMS, 10.98 mm max** under σ = 2 cm observation noise + 2-step (40 ms) control delay, beating every end-to-end variant on the same curve at the same compute budget, and dropping action jerk ~4× across the board.
 
-<p align="center">
-  <img src="results/viviani_residual/plots/yz_trace.png" width="320"/>
-  <img src="results/viviani_residual/plots/error_vs_time.png" width="480"/>
-</p>
+## Evidence
+
+The `viviani_residual` policy tracking its native curve under the training-distribution noise and delay. Deterministic best-by-eval rollout, 3 trajectory periods, 50 Hz control. Reproducible via `make eval` on a fresh clone using the committed checkpoint.
+
+**Tracking plots**
+
+<table>
+    <tr>
+      <td align="center"><img width="430" alt="yz trace" src="results/viviani_residual/plots/yz_trace.png" /><br><sub>YZ projection: target (blue) vs achieved TCP (orange) in the curve's primary plane</sub></td>
+      <td align="center"><img width="430" alt="xz trace" src="results/viviani_residual/plots/xz_trace.png" /><br><sub>XZ projection: depth dimension; both axes engaged, no degenerate planar reduction</sub></td>
+    </tr>
+    <tr>
+      <td colspan="2" align="center"><img width="860" alt="error vs time" src="results/viviani_residual/plots/error_vs_time.png" /><br><sub>L2 tracking error across 3 trajectory periods. Steady-state (after t&gt;1 s settle window): RMS 6.43 mm, max 10.98 mm</sub></td>
+    </tr>
+</table>
+
+**Multi-view rollout videos** (GitHub renders these inline when viewing this README on github.com; otherwise the files are at `results/viviani_residual/videos/`)
+
+<table>
+    <tr>
+      <td align="center"><video src="results/viviani_residual/videos/rollout_side.mp4" controls width="430"></video><br><sub>Side view (default eval render)</sub></td>
+      <td align="center"><video src="results/viviani_residual/videos/rollout_front.mp4" controls width="430"></video><br><sub>Front view</sub></td>
+    </tr>
+    <tr>
+      <td align="center"><video src="results/viviani_residual/videos/rollout_top.mp4" controls width="430"></video><br><sub>Top view (curve viewed along world −z)</sub></td>
+      <td align="center"><video src="results/viviani_residual/videos/rollout_bottom.mp4" controls width="430"></video><br><sub>Bottom view (curve viewed along world +z, through the table)</sub></td>
+    </tr>
+</table>
 
 Full numbers (end-to-end vs residual, native vs zero-shot, white vs pink noise) in [`RESULTS.md`](RESULTS.md).
 
@@ -108,26 +132,9 @@ make play ARGS="--config circle --checkpoint checkpoints/circle/best/best_model.
 
 > *macOS only:* `make play` invokes the `mjpython` trampoline required by MuJoCo's `launch_passive`, with `DYLD_LIBRARY_PATH` derived from the venv's Python at invocation time (so any 3.11.x patch works). On Linux you can call `uv run python scripts/play.py` directly. If you hit a `dyld` error, check the Makefile; `DYLD_LIBRARY_PATH` is overridable on the command line.
 
-## Example outputs
+## Where to look for more
 
-Every `scripts/eval.py --config <name>` run produces three plots and a side-view rollout video under `results/<name>/`. Below is the headline experiment, `viviani_residual` (Viviani curve, 4M training steps, σ = 2 cm noise + 2-step delay).
-
-**Tracking traces** (target vs achieved TCP, projected to y-z and x-z planes):
-
-<p align="center">
-  <img src="results/viviani_residual/plots/yz_trace.png" width="320"/>
-  <img src="results/viviani_residual/plots/xz_trace.png" width="320"/>
-</p>
-
-**Error vs time** (L2 distance from TCP to target across 3 trajectory periods):
-
-<p align="center">
-  <img src="results/viviani_residual/plots/error_vs_time.png" width="640"/>
-</p>
-
-**Videos:** the `eval` script writes `results/<name>/videos/rollout.mp4` (side view). For a multi-view render of the same rollout, run `uv run python scripts/tools/render_views.py --config <name>` and it will additionally produce `rollout_front.mp4`, `rollout_top.mp4`, and `rollout_bottom.mp4` in the same dir. The headline checkpoint's videos are tracked in this repo at `results/viviani_residual/videos/`.
-
-Comparison artifacts for the end-to-end variants live alongside, e.g. `results/circle/`, `results/viviani/`, `results/viviani_4m/`, `results/viviani_v2/`. The full numerical comparison is in [`RESULTS.md`](RESULTS.md).
+Per-trajectory artifacts for every variant cited in `RESULTS.md` live under `results/<name>/{plots,videos}/`. Regenerate any of them with `uv run python scripts/eval.py --config <name>`; add `--no-video` to skip the MP4 render. A multi-view render (front / side / top / bottom) of the same deterministic rollout is one command away: `uv run python scripts/tools/render_views.py --config <name>`.
 
 ## Project structure
 

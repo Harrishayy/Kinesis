@@ -13,6 +13,30 @@ TCP trace, finite-differenced at the control rate.
 
 ---
 
+## Gallery
+
+YZ projection (target vs achieved TCP) for each policy referenced below. Same target curve per row, different policies. Click any image to open at full resolution.
+
+<table>
+    <tr>
+      <td align="center"><a href="results/circle/plots/yz_trace.png"><img width="280" alt="circle baseline" src="results/circle/plots/yz_trace.png" /></a><br><sub><code>circle</code> -- end-to-end PPO on the 15 cm circle (RMS 23.08 mm)</sub></td>
+      <td align="center"><a href="results/viviani/plots/yz_trace.png"><img width="280" alt="viviani naive" src="results/viviani/plots/yz_trace.png" /></a><br><sub><code>viviani</code> -- naive PPO on the Viviani curve (RMS 29.18 mm)</sub></td>
+      <td align="center"><a href="results/viviani_slow/plots/yz_trace.png"><img width="280" alt="viviani slow" src="results/viviani_slow/plots/yz_trace.png" /></a><br><sub><code>viviani_slow</code> -- slowed period (RMS 16.93 mm)</sub></td>
+    </tr>
+    <tr>
+      <td align="center"><a href="results/viviani_4m/plots/yz_trace.png"><img width="280" alt="viviani 4m" src="results/viviani_4m/plots/yz_trace.png" /></a><br><sub><code>viviani_4m</code> -- 2&times; training compute (RMS 8.85 mm)</sub></td>
+      <td align="center"><a href="results/viviani_v2/plots/yz_trace.png"><img width="280" alt="viviani v2" src="results/viviani_v2/plots/yz_trace.png" /></a><br><sub><code>viviani_v2</code> -- + Cartesian velocity obs + longer lookahead (RMS 8.40 mm)</sub></td>
+      <td align="center"><a href="results/viviani_residual/plots/yz_trace.png"><img width="280" alt="viviani residual headline" src="results/viviani_residual/plots/yz_trace.png" /></a><br><sub><strong><code>viviani_residual</code></strong> -- the headline (RMS <strong>6.43 mm</strong>)</sub></td>
+    </tr>
+    <tr>
+      <td align="center"><a href="results/circle_residual/plots/yz_trace.png"><img width="280" alt="circle residual" src="results/circle_residual/plots/yz_trace.png" /></a><br><sub><code>viviani_residual</code> zero-shot on circle (RMS 12.95 mm, better than the natively-trained <code>circle</code> above)</sub></td>
+      <td align="center"><a href="results/figure8_3d_residual/plots/yz_trace.png"><img width="280" alt="figure8 residual zero-shot" src="results/figure8_3d_residual/plots/yz_trace.png" /></a><br><sub><code>viviani_residual</code> zero-shot on the 3-D figure-eight (RMS 31.45 mm)</sub></td>
+      <td align="center"><a href="results/viviani_residual_pink/plots/yz_trace.png"><img width="280" alt="viviani residual pink" src="results/viviani_residual_pink/plots/yz_trace.png" /></a><br><sub><code>viviani_residual_pink</code> -- pink-noise-trained variant (§3, RMS 7.09 mm)</sub></td>
+    </tr>
+</table>
+
+---
+
 **Context for the numbers below.** The internal "good" target for this
 project (from the project notes) was sub-1 cm RMS on a 15 cm circle at
 0.25 Hz. The headline residual policy in §2 clears that target on a
