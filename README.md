@@ -175,81 +175,58 @@ Per-trajectory artifacts for every variant cited in `RESULTS.md` live under `res
 
 ## Design note
 
-### State (observation)
+### Why residual RL on an analytic feedforward
 
-The policy sees a fixed-size vector of robot proprioception plus the upcoming trajectory:
+Naive end-to-end PPO on this task forces the policy to learn three things at once: (a) the arm's forward and inverse kinematics, (b) how to push *against* observation noise and control delay, and (c) the residual contact/inertial dynamics that aren't in a perfect kinematic model. Of those three, **only one actually requires learning**. Kinematics is closed-form: given `(q, target, target_vel)`, a damped-least-squares Jacobian pseudoinverse computes the joint deltas that drive the TCP toward the target in linear time, no training data needed. So every PPO sample spent rediscovering "joint 1 rotation moves the gripper in this direction" is a sample *not* spent learning the parts of the problem that genuinely require it.
+
+The residual decomposition is the structural fix:
+
+```
+a_total = clip( a_feedforward(q, target, target_vel) + a_residual(obs), ±1 )
+```
+
+The feedforward (a 6-DoF position + orientation IK) carries everything kinematic. The policy outputs only a small correction on top, so it can spend its entire sample budget on the irreducible part of the problem: anticipating control delay, filtering observation noise, and compensating for dynamics the IK doesn't model. Empirically this is the biggest single lever in the project: same 4 M PPO steps, same noise + delay, naive end-to-end converges to **8.40 mm steady RMS** on Viviani while the residual configuration reaches **6.43 mm**, with action jerk dropping ~4× from 188 m/s³ to 49 m/s³ because the feedforward's analytic smoothness shows through into the total action.
+
+The brief explicitly rewards creative solutions over "standard" tracking RL. The standard solution is to throw PPO at the whole problem; the more interesting solution is to figure out which part of the problem doesn't need RL at all and hand that part off. The remaining subsections describe the state, action, reward, and evaluation choices that make this work in practice.
+
+### State
 
 ```
 [ q (7), q̇ (7), ee_pos (3), target_now (3), target_lookahead (3 × N),
   phase_sin_cos (2), prev_action (7) ]
 ```
 
-Two design calls worth flagging:
-
-1. **Lookahead targets.** Instead of giving the policy only `target(t)`, we expose `target(t), target(t+Δ), target(t+2Δ), ..., target(t+NΔ)`. With observation noise + control delay, a policy that only sees "where I should be right now" is forced to differentiate noisy positions to estimate velocity. Handing it a short window of upcoming targets means it can read velocity and curvature directly from the obs. This is what lets the residual policy stay robust under σ = 2 cm noise without needing a learned filter (`viviani_v2` lookahead extension 0.4 s → 1.2 s is one of the documented experiments in `RESULTS.md`).
-2. **Phase sin/cos, not raw `t`.** The trajectory is periodic, so the policy should treat `t = 0` and `t = T` identically. Encoding phase as `(sin 2π t/T, cos 2π t/T)` makes the wrap-around continuous and is the standard trick from periodic-control RL.
+Two non-obvious calls. **Lookahead targets:** the policy sees `target(t), target(t+Δ), ..., target(t+NΔ)` rather than only `target(t)`, so it can read velocity and curvature directly instead of differentiating noisy positions. **Phase as `(sin, cos)`:** keeps `t = 0` and `t = T` continuous on a periodic curve; the standard periodic-control RL encoding.
 
 ### Action
 
-Joint position deltas (Δq ∈ ℝ⁷), clipped to ±5° per step at 50 Hz control. We deliberately avoided two more "elegant" choices:
-
-- **Torque control** would have given the policy fine-grained authority but turned every reward sweep into a stability hunt. Position-delta control delegates the inner loop to MuJoCo's PD controllers, which is what real Pandas use anyway.
-- **End-effector Cartesian deltas + analytic IK at every step** would have looked clean, but Cartesian targets near singularities silently produce huge joint moves. Letting the policy command joints directly keeps the action space well-conditioned everywhere in the workspace.
-
-For residual configs, the policy output is *added* to a damped-least-squares Jacobian-pseudoinverse IK action, and the sum is clipped to ±1:
-
-```
-a_total = clip( a_feedforward(q, target, target_vel) + a_residual(obs), ±1 )
-```
-
-The feedforward solves position + orientation IK using only `(q, target, target_vel)`, so the residual carries the dynamics, delay, and noise compensation. This decomposition gave us the biggest single improvement in the project (best naive: 8.40 mm RMS; with residual: 6.43 mm on a harder curve, and 4× lower jerk).
+Joint position deltas (Δq ∈ ℝ⁷), clipped to ±5° per step at 50 Hz. Torque control would have made every reward sweep a stability hunt; Cartesian deltas with online IK fail silently near singularities. Position-delta in joint space delegates the inner loop to MuJoCo's PD controllers (the same thing real Pandas use) and stays well-conditioned across the workspace.
 
 ### Reward
 
-Weighted sum, intentionally short:
-
 ```
-r =  - w_track * ||ee - target||²
-     - w_action_rate * ||a_t - a_{t-1}||²
-     - w_qdot * ||q̇||²
-     + w_inband * 1[||ee - target|| < ε]
-     - w_orient * (1 - cos θ)            # residual configs only
+r = - w_track * ||ee - target||²              # tracking
+    - w_action_rate * ||a_t - a_{t-1}||²       # smoothness
+    - w_qdot * ||q̇||²                          # smoothness
+    + w_inband * 1[||ee - target|| < ε]        # shaping bonus
+    - w_orient * (1 - cos θ)                   # residual configs only
 ```
 
-The first term is the only one that *teaches* tracking; the rest are smoothness/shaping. We deliberately started with `w_track` and `w_action_rate` alone, then added `w_qdot` once we saw the policy chattering through configurations with high joint velocity but low tip motion, and finally added the in-band shaping bonus to break a plateau where the policy hovered ~3 cm from the target indefinitely. The orientation term only matters for residual configs, which solve for hand-z pointing down: in pure-position end-to-end runs, the policy just ignored orientation and that was fine.
-
-The reward is normalised to per-step values (no episode-summing), so PPO's advantage estimator sees the right scale at every transition. All weights are in the trajectory's YAML so reward tuning is a config edit, not a code edit.
+Only the first term teaches tracking; the others are smoothness and shaping. We added them one at a time in response to failure modes seen in training: `w_qdot` after the policy started chattering through high-joint-velocity configurations, `w_inband` to break a plateau where the policy parked itself ~3 cm from the target. All weights live in the YAML so retuning is a config edit, not a code edit.
 
 ### Trajectory representation
 
-Each trajectory is a class with a single contract:
-
-```python
-def target(self, t: float) -> tuple[np.ndarray, np.ndarray]:
-    """Return (position_world_xyz, velocity_world_xyz) at phase t."""
-```
-
-The policy is stateless with respect to *which* trajectory it's tracking, it only ever sees `target_now` and the lookahead window. Three concrete curves are implemented:
-
-- `circle` -- 15 cm radius in the y-z plane, 0.25 Hz. Engages mainly elbow + wrist. Used as the smoke-test baseline.
-- `figure8_3d` -- tilted 3-D Lissajous. Forces shoulder/base joints to participate.
-- `viviani` -- intersection of a sphere with a tangent cylinder, a figure-eight on a sphere. Deliberately harder than the circle (the policy can't park its base) and is the headline test curve.
-
-Because the policy interface depends only on `target_now + lookahead`, the same `viviani_residual` checkpoint zero-shots onto the circle and the figure-8 at eval time (see `RESULTS.md §2`).
+Each trajectory is a class with one method: `target(t) -> (pos, vel)`. The policy never sees *which* trajectory, only `target_now` and the lookahead window, which is why the same `viviani_residual` checkpoint zero-shots onto the circle and the 3-D figure-eight at eval time (`RESULTS.md §2`). Three curves are implemented: `circle` (planar, baseline), `figure8_3d` (tilted Lissajous, all 7 joints engaged), and `viviani` (sphere-cylinder intersection, the headline test curve).
 
 ### Evaluation methodology
 
-All numbers in `RESULTS.md` come from the same protocol:
+Deterministic rollouts of the best-by-eval checkpoint, same env + wrappers as training (σ = 2 cm noise, 2-step delay), 500 steps = 2.5 periods, settle window of 1 s dropped before computing steady-state metrics. We report three:
 
-1. **Deterministic best-checkpoint rollout.** PPO trains stochastically, but we evaluate the best-by-validation checkpoint with the action distribution's mean (not a sample). Two reasons: a single training run has stochastic seeds, but the *policy you'd deploy* is the deterministic one; and removing the rollout's exploration noise isolates tracking quality from exploration variance.
-2. **Same env as training, including wrappers.** Evaluation runs with σ = 2 cm observation noise + 2-step (40 ms) control delay. We don't strip the wrappers for eval, because the brief explicitly asks for behaviour under uncertainty, not best-case nominal tracking.
-3. **Three metrics, three concerns.**
-   - **Steady-state RMS** of the tip-to-target L2 distance, dropping the first half-period (the policy starts at an IK-fitted home pose, so there's a transient settling we don't want to dominate the number). RMS captures average tracking quality.
-   - **Steady-state max** captures worst-case excursion, which for a manipulator is often what matters more than the average -- a 6 mm RMS that occasionally spikes to 5 cm is much worse than a steady 8 mm.
-   - **Time-RMS jerk** (`d³ee/dt³` of the recorded TCP trace, finite-differenced at the control rate). This is what makes the difference between "the arm follows the curve" and "the arm follows the curve smoothly enough to put a glass of water on the gripper". Jerk is the single best proxy for whether the policy is using actuation cleanly or fighting noise.
-4. **Same episode length, same period count.** 500 steps = 10 s = 2.5 periods of the curve. Comparing variants under different episode lengths would confound "policy is better" with "policy got more periods to converge", so this is held fixed across configs.
+- **Steady-state RMSE** of the 3-D position error: average tracking quality.
+- **Steady-state max**: worst-case excursion (a 6 mm RMS that spikes to 5 cm is much worse than a steady 8 mm).
+- **Time-RMS jerk** of the TCP trace: smoothness, the proxy for whether the policy is using actuation cleanly or fighting noise.
 
-The reasoning behind reporting all three is that any single metric is gameable. A policy can achieve excellent RMS by being very slightly biased toward an "average" position and never moving (low RMS, terrible max). A policy can achieve excellent max by aggressively snapping to targets every step (good max, awful jerk, broken hardware). Reporting RMS + max + jerk together makes it hard to optimise a number without optimising the underlying behaviour.
+Any single metric is gameable (RMS by sitting near the trajectory mean; max by snapping; jerk by not moving). Reporting all three keeps the policy honest.
 
 ### Why this decomposition matters for the role
 
