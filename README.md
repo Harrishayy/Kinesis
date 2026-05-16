@@ -179,13 +179,13 @@ Per-trajectory artifacts for every variant cited in `RESULTS.md` live under `res
 
 Naive end-to-end PPO on this task forces the policy to learn three things at once: (a) the arm's forward and inverse kinematics, (b) how to push *against* observation noise and control delay, and (c) the residual contact/inertial dynamics that aren't in a perfect kinematic model. Of those three, **only one actually requires learning**. Kinematics is closed-form: given `(q, target, target_vel)`, a damped-least-squares Jacobian pseudoinverse computes the joint deltas that drive the TCP toward the target in linear time, no training data needed. So every PPO sample spent rediscovering "joint 1 rotation moves the gripper in this direction" is a sample *not* spent learning the parts of the problem that genuinely require it.
 
-The residual decomposition is the structural fix:
+The residual decomposition is the structural fix, following Johannink et al. (2018) [[1]](#references):
 
 ```
 a_total = clip( a_feedforward(q, target, target_vel) + a_residual(obs), ±1 )
 ```
 
-The feedforward (a 6-DoF position + orientation IK) carries everything kinematic. The policy outputs only a small correction on top, so it can spend its entire sample budget on the irreducible part of the problem: anticipating control delay, filtering observation noise, and compensating for dynamics the IK doesn't model. Empirically this is the biggest single lever in the project: same 4 M PPO steps, same noise + delay, naive end-to-end converges to **8.40 mm steady RMS** on Viviani while the residual configuration reaches **6.43 mm**, with action jerk dropping ~4× from 188 m/s³ to 49 m/s³ because the feedforward's analytic smoothness shows through into the total action.
+The feedforward (a 6-DoF position + orientation IK) carries everything kinematic. The policy outputs only a small correction on top, so it can spend its entire sample budget on the irreducible part of the problem: anticipating control delay, filtering observation noise, and compensating for dynamics the IK doesn't model. The original residual-RL paper uses hand-coded P-controllers or motion primitives as the feedforward; in this project the feedforward is specialised to an analytic damped-least-squares Jacobian-pseudoinverse IK, which is well-defined everywhere in the workspace (including near kinematic singularities, courtesy of the damping term) and produces an analytically smooth action signal. Empirically this is the biggest single lever in the project: same 4 M PPO steps, same noise + delay, naive end-to-end converges to **8.40 mm steady RMS** on Viviani while the residual configuration reaches **6.43 mm**, with action jerk dropping ~4× from 188 m/s³ to 49 m/s³ because the feedforward's analytic smoothness shows through into the total action.
 
 The brief explicitly rewards creative solutions over "standard" tracking RL. The standard solution is to throw PPO at the whole problem; the more interesting solution is to figure out which part of the problem doesn't need RL at all and hand that part off. The remaining subsections describe the state, action, reward, and evaluation choices that make this work in practice.
 
@@ -228,13 +228,21 @@ Deterministic rollouts of the best-by-eval checkpoint, same env + wrappers as tr
 
 Any single metric is gameable (RMS by sitting near the trajectory mean; max by snapping; jerk by not moving). Reporting all three keeps the policy honest.
 
-### Why this decomposition matters for the role
+### Why this structure matters in robotics
 
-The analytic-feedforward + learned-residual structure used here is the same decomposition increasingly used in sim-to-real humanoid control: the feedforward carries everything that is model-based (kinematics, gravity compensation, contact handling) and the residual carries the dynamics and disturbances that are hard to model. Keeping the residual small is what makes domain randomization tractable on real hardware, because the policy is only ever asked to learn a small correction on top of a behaviour that is already approximately correct. A 7-DoF arm tracking a Cartesian curve is a small testbed for that decomposition; the contribution here is empirical (does the structure help under noise + delay, and by how much), not architectural.
+The analytic-feedforward + learned-residual decomposition is broadly useful anywhere a robot has to combine a partially-known model with sensing and actuation that aren't well-modelled. Kinematics, gravity compensation, and feasible-path generation are closed-form or near-closed-form for most platforms (arms, mobile bases, legged robots). What isn't closed-form is contact, friction, actuator non-idealities, communication delay, and sensor noise. Splitting the controller along that seam lets each side do what it is good at: the model-based feedforward produces a behaviour that is already approximately correct and analytically smooth, and the learned residual only has to compensate for the gap.
+
+The practical payoff is sim-to-real. A policy that has to learn the full control problem from scratch tends to either overfit to simulator dynamics (catastrophic transfer failure) or require so much domain randomisation that it becomes conservative and slow. A small residual on top of a trustworthy feedforward stays approximately correct under randomisation, because the feedforward already handles the high-leverage parts and the residual is bounded in magnitude. This is why the same structural pattern keeps reappearing in deployed robotics systems: model-based core, learned correction.
+
+A 7-DoF arm tracking a Cartesian curve under noise and delay is a small, well-instrumented testbed for that structure. The contribution in this repo is empirical (does the decomposition help, and by how much), not architectural.
 
 ## Development
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, testing, and code-style notes.
+
+## References
+
+[1] Johannink, T., Bahl, S., Nair, A., Luo, J., Kumar, A., Loskyll, M., Aparicio Ojea, J., Solowjow, E., & Levine, S. (2018). *Residual Reinforcement Learning for Robot Control.* arXiv:1812.03201. [PDF](https://arxiv.org/pdf/1812.03201). Introduces the `u = u_H(s) + π_θ(s)` decomposition used in this project's residual configs. Their `u_H` is a hand-coded controller; here it is specialised to an analytic damped-least-squares Jacobian-pseudoinverse IK feedforward.
 
 ## License
 
