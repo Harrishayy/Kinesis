@@ -90,7 +90,7 @@ class PandaTrackConfig:
     trajectory_amp_z_m: float = 0.10
     # Viviani-only:
     trajectory_sphere_radius_m: float = 0.12
-    # Reward weights (see CLAUDE.md). Keep prior values in comments when tuning.
+    # Reward weights. Keep prior values in comments when tuning.
     w_track: float = 10.0
     w_action_rate: float = 0.1
     w_qdot: float = 0.001

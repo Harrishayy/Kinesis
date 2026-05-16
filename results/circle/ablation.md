@@ -1,6 +1,6 @@
 # Uncertainty ablation
 
-Deterministic policy from `/Users/harrishayyanar/Documents/Kinesis/checkpoints/best/best_model.zip` evaluated on 400 steps (8.0 s) of circle tracking under four uncertainty conditions.
+Deterministic policy from `checkpoints/circle/best/best_model.zip` evaluated on 400 steps (8.0 s) of circle tracking under four uncertainty conditions.
 
 | Condition | Full RMS (mm) | Full MAX (mm) | Steady RMS (mm) | Steady MAX (mm) | RMS jerk (m/s³) |
 | --- | ---: | ---: | ---: | ---: | ---: |
