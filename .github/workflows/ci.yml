@@ -27,7 +27,19 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Lint with ruff
-        run: ruff check src tests
+        run: ruff check src tests scripts
 
       - name: Run tests
         run: pytest -q
+
+      # Confirms MuJoCo loads, the SubprocVecEnv stack builds, and the wrapper
+      # chain (noise + delay) steps without exception. ~5 s on the runner.
+      - name: Training smoke (200 SubprocVecEnv steps)
+        run: python scripts/train.py --smoke
+
+      # Confirms the committed viviani_residual checkpoint loads and produces
+      # a finite tracking error. This is the headline reproduction path the
+      # README promises a fresh-clone reviewer can run. `--no-video` skips the
+      # ffmpeg/imageio dependency on a headless runner.
+      - name: Headline eval reproducibility check
+        run: python scripts/eval.py --config viviani_residual --periods 0.5 --no-video
