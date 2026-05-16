@@ -85,9 +85,7 @@ def test_action_delay_queues_correctly() -> None:
 
 
 def test_combined_wrappers_run_clean(base_env: PandaTrackEnv) -> None:
-    env = ActionDelayWrapper(
-        ObsNoiseWrapper(base_env, sigma_m=0.02, seed=0), delay_steps=2
-    )
+    env = ActionDelayWrapper(ObsNoiseWrapper(base_env, sigma_m=0.02, seed=0), delay_steps=2)
     obs, _ = env.reset(seed=0)
     rng = np.random.default_rng(7)
     for _ in range(50):

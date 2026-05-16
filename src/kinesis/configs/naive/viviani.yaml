@@ -1,0 +1,48 @@
+# Viviani's curve tracking configuration.
+#
+# The end-effector traces the intersection of a sphere (radius R) and a
+# cylinder of radius R/2 tangent to it through the sphere centre — a closed
+# 3D curve whose xy projection is a circle and whose xz projection is a
+# figure-eight. Self-intersecting in projection, smooth in 3D. With R = 12 cm
+# the bbox is 12 x 12 x 24 cm, comfortably inside the same workspace as the
+# circle benchmark. One period traces the full 4π parameter range, so the
+# phase (sin, cos) uniquely identifies the leaf at the curve's self-crossing.
+
+env:
+  control_hz: 50
+  max_steps: 500
+  max_delta_rad: 0.0873  # ~5 degrees per control step
+  reset_noise_rad: 0.02
+  start_at_target: true
+  tip_offset_m: 0.1034
+  lookahead_n: 4
+  lookahead_dt_s: 0.1
+  # Same home pose as the circle / figure-8 configs — identical workspace centre.
+  home_qpos: [0.257813, 0.163813, -0.335467, -1.865636, 0.389176, 1.429329, -0.965127]
+
+trajectory:
+  kind: viviani
+  period_s: 4.0
+  center_xyz: [0.5, 0.0, 0.4]
+  sphere_radius_m: 0.12
+
+wrappers:
+  obs_noise_sigma_m: 0.02
+  action_delay_steps: 2
+
+reward:
+  w_track: 10.0
+  w_action_rate: 0.1
+  w_qdot: 0.001
+  w_inband: 0.5
+  w_orient: 0.25
+
+ppo:
+  total_timesteps: 2_000_000
+  n_envs: 16
+  learning_rate: 3.0e-4
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95

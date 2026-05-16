@@ -3,6 +3,7 @@ CLAUDE.md
 .claude/
 _internal/
 scratch/
+docs/
 
 # === Python ===
 __pycache__/
@@ -21,6 +22,16 @@ checkpoints/
 wandb/
 *.zip
 *.pt
+
+# Keep the headline residual-RL checkpoints (2 MB each, needed for play.py / eval.py defaults).
+!checkpoints/
+checkpoints/*
+!checkpoints/viviani_residual/
+checkpoints/viviani_residual/*
+!checkpoints/viviani_residual/best/
+checkpoints/viviani_residual/best/*
+!checkpoints/viviani_residual/best/best_model.zip
+!checkpoints/viviani_residual/ppo_panda_final.zip
 
 # === Results — keep only curated finals ===
 results/raw/

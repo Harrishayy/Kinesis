@@ -15,7 +15,13 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
-ASSET = Path(__file__).resolve().parents[1] / "assets" / "mujoco_menagerie" / "franka_emika_panda" / "scene.xml"
+ASSET = (
+    Path(__file__).resolve().parents[2]
+    / "assets"
+    / "mujoco_menagerie"
+    / "franka_emika_panda"
+    / "scene.xml"
+)
 TARGET = np.array([0.5, 0.0, 0.4])
 N_TRIALS = 8000
 NOISE_SIGMA = 0.5  # rad, per joint

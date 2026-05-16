@@ -1,0 +1,58 @@
+# Viviani v2 — improved obs / lookahead / policy capacity.
+#
+# Three changes vs viviani_4m, applied together:
+# 1. Observation now includes EE Cartesian velocity (finite-diff on the clean
+#    internal position; the noise wrapper still only corrupts ee_pos) and the
+#    target velocity (analytic, from the first lookahead sample). Gives the
+#    policy explicit Cartesian-rate awareness that previously had to be
+#    inferred from joint velocities + forward kinematics.
+# 2. Lookahead horizon widened from 0.4 s (4 × 0.1) to 1.2 s (8 × 0.15) — 30 %
+#    of one period vs 10 % before. Targets the figure-eight self-crossing
+#    where the target direction-reverses fast.
+# 3. MLP widened from SB3's default [64, 64] to [256, 256]. Obs is 47-D
+#    (vs the old 41-D); [64, 64] was undersized for the structured task.
+#
+# Same 4M training budget as viviani_4m so the comparison is on architecture
+# alone.
+
+name: viviani_v2
+
+env:
+  control_hz: 50
+  max_steps: 500
+  max_delta_rad: 0.0873
+  reset_noise_rad: 0.02
+  start_at_target: true
+  tip_offset_m: 0.1034
+  include_cartesian_velocities: true
+  lookahead_n: 8
+  lookahead_dt_s: 0.15
+  home_qpos: [0.257813, 0.163813, -0.335467, -1.865636, 0.389176, 1.429329, -0.965127]
+
+trajectory:
+  kind: viviani
+  period_s: 4.0
+  center_xyz: [0.5, 0.0, 0.4]
+  sphere_radius_m: 0.12
+
+wrappers:
+  obs_noise_sigma_m: 0.02
+  action_delay_steps: 2
+
+reward:
+  w_track: 10.0
+  w_action_rate: 0.1
+  w_qdot: 0.001
+  w_inband: 0.5
+  w_orient: 0.25
+
+ppo:
+  total_timesteps: 4_000_000
+  n_envs: 16
+  learning_rate: 3.0e-4
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  net_arch: [256, 256]

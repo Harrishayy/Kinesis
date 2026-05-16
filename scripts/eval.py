@@ -1,15 +1,19 @@
 """Deterministic evaluation of a trained Kinesis PPO policy.
 
 Outputs (under per-trajectory subdirectories):
-- results/plots/<traj>/yz_trace.png        — target vs achieved EE (y-z plane)
-- results/plots/<traj>/xz_trace.png        — only for 3D trajectories
-- results/plots/<traj>/error_vs_time.png   — tracking error magnitude vs time
-- results/videos/<traj>/rollout.mp4        — offscreen-rendered rollout video
+- results/<traj>/plots/yz_trace.png        target vs achieved EE (y-z plane)
+- results/<traj>/plots/xz_trace.png        only for 3D trajectories
+- results/<traj>/plots/error_vs_time.png   tracking error magnitude vs time
+- results/<traj>/videos/rollout.mp4        offscreen-rendered rollout video
 - prints a one-line metric summary (RMS / max / jerk)
+
+Loads checkpoints/<traj>/best/best_model.zip by default (the best-by-eval
+checkpoint that produces the numbers in RESULTS.md). Falls back to
+ppo_panda_final.zip if best/ does not exist.
 
 Usage:
     uv run python scripts/eval.py
-    uv run python scripts/eval.py --config figure8_3d
+    uv run python scripts/eval.py --config viviani_residual
     uv run python scripts/eval.py --checkpoint checkpoints/circle/best/best_model.zip
 """
 
@@ -68,20 +72,64 @@ def rollout(model: PPO, env, n_steps: int) -> dict[str, np.ndarray]:
     return {"ee_pos": ee_pos, "target": target, "actions": actions}
 
 
+def _add_marker(scene, *, pos, size, rgba, geom_type=None) -> None:
+    """Append a sphere/line marker to a mjvScene before rendering. Reads the
+    current ngeom, initialises geoms[ngeom] in-place, and increments ngeom."""
+    if scene.ngeom >= scene.maxgeom:
+        return  # silently drop overflows so a long trail can't crash a render
+    if geom_type is None:
+        geom_type = mujoco.mjtGeom.mjGEOM_SPHERE
+    mujoco.mjv_initGeom(
+        scene.geoms[scene.ngeom],
+        type=geom_type,
+        size=np.asarray(size, dtype=np.float64),
+        pos=np.asarray(pos, dtype=np.float64),
+        mat=np.eye(3, dtype=np.float64).flatten(),
+        rgba=np.asarray(rgba, dtype=np.float32),
+    )
+    scene.ngeom += 1
+
+
 def render_video(env, model: PPO, n_steps: int, out_path: Path) -> None:
+    """Render a deterministic rollout to video with two trajectory annotations:
+    a blue dotted trail showing the full closed curve, and a red "laser-
+    pointer" sphere at the current target so a viewer can see what the EE is
+    chasing each frame."""
     panda = _unwrap_to_panda(env)
     renderer = mujoco.Renderer(panda.model, height=VIDEO_HEIGHT, width=VIDEO_WIDTH)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Static dotted preview of the full closed curve (so a viewer can see the
+    # shape before / after the EE traces it).
+    trail_ts = np.linspace(0.0, panda.trajectory.period_s, 96, endpoint=False)
+    trail_pts = [panda.trajectory.target(float(t)) for t in trail_ts]
+
+    # Dynamic past-EE trail — grows each frame so the rendered video shows the
+    # actual path the gripper TCP has taken so far.
+    ee_history: list[np.ndarray] = []
     obs, _ = env.reset(seed=0)
     with imageio.get_writer(str(out_path), fps=VIDEO_FPS, codec="libx264") as writer:
         for _ in range(n_steps):
             action, _ = model.predict(obs, deterministic=True)
-            obs, _, terminated, truncated, _ = env.step(action)
+            obs, _, terminated, truncated, info = env.step(action)
+            ee_history.append(np.asarray(info["ee_pos"], dtype=np.float64))
             renderer.update_scene(panda.data, camera=0 if panda.model.ncam else -1)
+            scene = renderer.scene
+            for pt in trail_pts:
+                _add_marker(scene, pos=pt, size=[0.0035, 0, 0], rgba=[0.30, 0.55, 1.0, 0.45])
+            for pt in ee_history:
+                _add_marker(scene, pos=pt, size=[0.0035, 0, 0], rgba=[1.0, 0.85, 0.10, 0.9])
+            current_target = panda.trajectory.target(panda._t())
+            _add_marker(
+                scene,
+                pos=current_target,
+                size=[0.013, 0, 0],
+                rgba=[1.0, 0.15, 0.15, 1.0],
+            )
             writer.append_data(renderer.render())
             if terminated or truncated:
                 obs, _ = env.reset(seed=0)
+                ee_history.clear()
     renderer.close()
 
 
@@ -165,7 +213,10 @@ def main() -> None:
     parser.add_argument(
         "--checkpoint",
         default=None,
-        help="defaults to checkpoints/<traj>/ppo_panda_final.zip",
+        help=(
+            "defaults to checkpoints/<traj>/best/best_model.zip "
+            "(falls back to ppo_panda_final.zip if best/ is missing)"
+        ),
     )
     parser.add_argument("--periods", type=float, default=3.0)
     parser.add_argument("--no-video", action="store_true")
@@ -173,11 +224,16 @@ def main() -> None:
 
     cfg = load_config(args.config)
     kind = str(cfg.get("trajectory", {}).get("kind", "circle"))
-    plots_dir = RESULTS / "plots" / kind
-    videos_dir = RESULTS / "videos" / kind
-    checkpoint = args.checkpoint or str(
-        REPO / "checkpoints" / kind / "ppo_panda_final.zip"
-    )
+    name = str(cfg.get("name", kind))
+    plots_dir = RESULTS / name / "plots"
+    videos_dir = RESULTS / name / "videos"
+    if args.checkpoint:
+        checkpoint = args.checkpoint
+    else:
+        best = REPO / "checkpoints" / name / "best" / "best_model.zip"
+        checkpoint = str(
+            best if best.exists() else REPO / "checkpoints" / name / "ppo_panda_final.zip"
+        )
 
     env = make_env(cfg, seed=0, apply_wrappers=True)
     panda = _unwrap_to_panda(env)
@@ -205,9 +261,9 @@ def main() -> None:
         render_video(env, model, n_steps=n_steps, out_path=videos_dir / "rollout.mp4")
 
     print(
-        f"[eval] RMS={m['rms_m']*1000:.2f} mm  MAX={m['max_m']*1000:.2f} mm  "
-        f"steady(t>1s) RMS={m['rms_steady_m']*1000:.2f} mm  "
-        f"MAX={m['max_steady_m']*1000:.2f} mm  "
+        f"[eval] RMS={m['rms_m'] * 1000:.2f} mm  MAX={m['max_m'] * 1000:.2f} mm  "
+        f"steady(t>1s) RMS={m['rms_steady_m'] * 1000:.2f} mm  "
+        f"MAX={m['max_steady_m'] * 1000:.2f} mm  "
         f"RMS_jerk={m['rms_jerk_m_per_s3']:.1f} m/s^3"
     )
 

@@ -34,8 +34,9 @@ REPO = Path(__file__).resolve().parents[1]
 
 def _traj_dirs(cfg: dict) -> tuple[Path, Path, Path]:
     kind = str(cfg.get("trajectory", {}).get("kind", "circle"))
-    log_dir = REPO / "logs" / "tb" / kind
-    ckpt_dir = REPO / "checkpoints" / kind
+    name = str(cfg.get("name", kind))
+    log_dir = REPO / "logs" / "tb" / name
+    ckpt_dir = REPO / "checkpoints" / name
     return log_dir, ckpt_dir, ckpt_dir / "best"
 
 
@@ -86,9 +87,7 @@ class TrackingErrorCallback(BaseCallback):
         if self._buf and self.num_timesteps % 2048 == 0:
             arr = np.asarray(self._buf)
             self.logger.record("rollout/ee_error_mean_m", float(arr.mean()))
-            self.logger.record(
-                "rollout/ee_error_rms_m", float(np.sqrt((arr**2).mean()))
-            )
+            self.logger.record("rollout/ee_error_rms_m", float(np.sqrt((arr**2).mean())))
         return True
 
 
@@ -104,6 +103,9 @@ def train(cfg: dict, timesteps: int, use_subproc: bool, device: str) -> None:
     vec = _build_vec(cfg, n_envs=n_envs, use_subproc=use_subproc, seed_base=0)
     eval_vec = _build_vec(cfg, n_envs=1, use_subproc=False, seed_base=10_000)
 
+    net_arch = ppo_cfg.get("net_arch")
+    policy_kwargs = {"net_arch": list(net_arch)} if net_arch is not None else None
+
     model = PPO(
         policy="MlpPolicy",
         env=vec,
@@ -113,6 +115,7 @@ def train(cfg: dict, timesteps: int, use_subproc: bool, device: str) -> None:
         n_epochs=int(ppo_cfg.get("n_epochs", 10)),
         gamma=float(ppo_cfg.get("gamma", 0.99)),
         gae_lambda=float(ppo_cfg.get("gae_lambda", 0.95)),
+        policy_kwargs=policy_kwargs,
         tensorboard_log=str(log_dir),
         verbose=1,
         device=device,
@@ -166,9 +169,7 @@ def main() -> None:
     )
     parser.add_argument("--n-envs", type=int, default=None)
     parser.add_argument("--n-steps", type=int, default=200, help="smoke: steps per env")
-    parser.add_argument(
-        "--dummy", action="store_true", help="Use DummyVecEnv (debug fallback)"
-    )
+    parser.add_argument("--dummy", action="store_true", help="Use DummyVecEnv (debug fallback)")
     parser.add_argument("--device", default="cpu", choices=["cpu", "mps", "cuda"])
     parser.add_argument(
         "--config",

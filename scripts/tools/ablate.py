@@ -21,7 +21,7 @@ from stable_baselines3 import PPO
 from kinesis.envs.factory import load_config, make_env
 from kinesis.envs.panda_track import PandaTrackEnv
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 
 
 def _unwrap_to_panda(env) -> PandaTrackEnv:
@@ -74,9 +74,8 @@ def main() -> None:
 
     base_cfg = load_config(args.config)
     kind = str(base_cfg.get("trajectory", {}).get("kind", "circle"))
-    checkpoint = checkpoint or str(
-        REPO / "checkpoints" / kind / "best" / "best_model.zip"
-    )
+    name = str(base_cfg.get("name", kind))
+    checkpoint = args.checkpoint or str(REPO / "checkpoints" / name / "best" / "best_model.zip")
     panda = _unwrap_to_panda(make_env(base_cfg, seed=0, apply_wrappers=False))
     n_steps = min(
         int(round(args.periods * panda.cfg.trajectory_period_s * panda.cfg.control_hz)),
@@ -86,10 +85,10 @@ def main() -> None:
     print(f"[ablate] traj={kind} checkpoint={checkpoint}")
 
     conditions: list[tuple[str, dict]] = [
-        ("clean",        {"obs_noise_sigma_m": 0.0,  "action_delay_steps": 0}),
-        ("noise only",   {"obs_noise_sigma_m": 0.02, "action_delay_steps": 0}),
-        ("delay only",   {"obs_noise_sigma_m": 0.0,  "action_delay_steps": 2}),
-        ("noise+delay",  {"obs_noise_sigma_m": 0.02, "action_delay_steps": 2}),
+        ("clean", {"obs_noise_sigma_m": 0.0, "action_delay_steps": 0}),
+        ("noise only", {"obs_noise_sigma_m": 0.02, "action_delay_steps": 0}),
+        ("delay only", {"obs_noise_sigma_m": 0.0, "action_delay_steps": 2}),
+        ("noise+delay", {"obs_noise_sigma_m": 0.02, "action_delay_steps": 2}),
     ]
 
     rows = []

@@ -15,21 +15,30 @@ from kinesis.envs.panda_track import PandaTrackConfig, PandaTrackEnv
 from kinesis.envs.wrappers import ActionDelayWrapper, ObsNoiseWrapper
 
 CONFIGS_DIR = Path(__file__).resolve().parents[1] / "configs"
-_DEFAULT_CONFIG = CONFIGS_DIR / "circle.yaml"
+_DEFAULT_CONFIG = CONFIGS_DIR / "naive" / "circle.yaml"
 
 
 def load_config(path: str | Path | None = None) -> dict:
     """Load a YAML config.
 
     `path` may be an absolute/relative file path, or a bare trajectory name
-    such as ``"circle"`` / ``"figure8_3d"`` resolved to ``configs/<name>.yaml``.
+    such as ``"circle"`` / ``"viviani_residual"``. Bare names are resolved by
+    recursively searching ``configs/`` (so ``naive/`` and ``residual/`` subdirs
+    are both visible without specifying the subdir).
     """
     if path is None:
         path = _DEFAULT_CONFIG
     else:
         p = Path(path)
         if not p.exists() and not p.suffix:
-            p = CONFIGS_DIR / f"{p.name}.yaml"
+            matches = sorted(CONFIGS_DIR.rglob(f"{p.name}.yaml"))
+            if not matches:
+                raise FileNotFoundError(f"No config '{p.name}.yaml' under {CONFIGS_DIR}")
+            if len(matches) > 1:
+                raise ValueError(
+                    f"Ambiguous config '{p.name}': {[str(m.relative_to(CONFIGS_DIR)) for m in matches]}"
+                )
+            p = matches[0]
         path = p
     with open(path) as f:
         return yaml.safe_load(f)
@@ -48,6 +57,11 @@ def _panda_config(cfg: dict) -> PandaTrackConfig:
         lookahead_n=int(env_c.get("lookahead_n", 4)),
         lookahead_dt_s=float(env_c.get("lookahead_dt_s", 0.1)),
         home_qpos=tuple(env_c.get("home_qpos", defaults.home_qpos)),
+        start_at_target=bool(env_c.get("start_at_target", defaults.start_at_target)),
+        tip_offset_m=float(env_c.get("tip_offset_m", defaults.tip_offset_m)),
+        include_cartesian_velocities=bool(
+            env_c.get("include_cartesian_velocities", defaults.include_cartesian_velocities)
+        ),
         trajectory_kind=str(traj_c.get("kind", "circle")),
         trajectory_period_s=float(traj_c.get("period_s", 4.0)),
         trajectory_center_xyz=tuple(traj_c.get("center_xyz", (0.5, 0.0, 0.4))),
@@ -55,10 +69,22 @@ def _panda_config(cfg: dict) -> PandaTrackConfig:
         trajectory_amp_x_m=float(traj_c.get("amp_x_m", defaults.trajectory_amp_x_m)),
         trajectory_amp_y_m=float(traj_c.get("amp_y_m", defaults.trajectory_amp_y_m)),
         trajectory_amp_z_m=float(traj_c.get("amp_z_m", defaults.trajectory_amp_z_m)),
+        trajectory_sphere_radius_m=float(
+            traj_c.get("sphere_radius_m", defaults.trajectory_sphere_radius_m)
+        ),
         w_track=float(rew_c.get("w_track", 10.0)),
         w_action_rate=float(rew_c.get("w_action_rate", 0.1)),
         w_qdot=float(rew_c.get("w_qdot", 0.001)),
         w_inband=float(rew_c.get("w_inband", 0.5)),
+        w_orient=float(rew_c.get("w_orient", defaults.w_orient)),
+        residual_ff_enabled=bool(cfg.get("residual_ff", {}).get("enabled", False)),
+        residual_ff_p_gain=float(
+            cfg.get("residual_ff", {}).get("p_gain", defaults.residual_ff_p_gain)
+        ),
+        residual_ff_damping=float(
+            cfg.get("residual_ff", {}).get("damping", defaults.residual_ff_damping)
+        ),
+        residual_ff_clip=float(cfg.get("residual_ff", {}).get("clip", defaults.residual_ff_clip)),
     )
 
 
@@ -75,8 +101,10 @@ def make_env(
         wcfg = cfg.get("wrappers", {})
         sigma = float(wcfg.get("obs_noise_sigma_m", 0.0))
         delay = int(wcfg.get("action_delay_steps", 0))
+        color = str(wcfg.get("noise_color", "white"))
+        n_octaves = int(wcfg.get("noise_octaves", 6))
         if sigma > 0:
-            env = ObsNoiseWrapper(env, sigma_m=sigma, seed=seed)
+            env = ObsNoiseWrapper(env, sigma_m=sigma, seed=seed, color=color, n_octaves=n_octaves)
         if delay > 0:
             env = ActionDelayWrapper(env, delay_steps=delay)
     return env

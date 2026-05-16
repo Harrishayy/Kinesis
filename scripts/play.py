@@ -23,7 +23,6 @@ from pathlib import Path
 
 import mujoco
 import mujoco.viewer
-import numpy as np
 from stable_baselines3 import PPO
 
 from kinesis.envs.factory import load_config, make_env
@@ -56,9 +55,8 @@ def main() -> None:
 
     cfg = load_config(args.config)
     kind = str(cfg.get("trajectory", {}).get("kind", "circle"))
-    checkpoint = checkpoint or str(
-        REPO / "checkpoints" / kind / "best" / "best_model.zip"
-    )
+    name = str(cfg.get("name", kind))
+    checkpoint = args.checkpoint or str(REPO / "checkpoints" / name / "best" / "best_model.zip")
     env = make_env(cfg, seed=0, apply_wrappers=not args.no_wrappers)
     panda = _unwrap_to_panda(env)
     control_dt = 1.0 / panda.cfg.control_hz
@@ -68,10 +66,11 @@ def main() -> None:
     print(
         f"[play] checkpoint={checkpoint}  "
         f"wrappers={'on' if not args.no_wrappers else 'off'}  "
-        f"control_dt={control_dt*1000:.0f}ms"
+        f"control_dt={control_dt * 1000:.0f}ms"
     )
-    print("[play] window controls: right-drag rotate, shift+right-drag pan, "
-          "scroll zoom, space pause")
+    print(
+        "[play] window controls: right-drag rotate, shift+right-drag pan, scroll zoom, space pause"
+    )
 
     with mujoco.viewer.launch_passive(panda.model, panda.data) as viewer:
         while viewer.is_running():

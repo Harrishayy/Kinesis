@@ -14,6 +14,7 @@ from typing import Any
 from kinesis.trajectories.base import Trajectory
 from kinesis.trajectories.circle import CircleTrajectory
 from kinesis.trajectories.figure8_3d import Figure8_3DTrajectory
+from kinesis.trajectories.viviani import VivianiTrajectory
 
 
 def build_trajectory(kind: str, center_xyz, **params: Any) -> Trajectory:
@@ -32,6 +33,12 @@ def build_trajectory(kind: str, center_xyz, **params: Any) -> Trajectory:
             amp_z_m=float(params["amp_z_m"]),
             period_s=float(params["period_s"]),
         )
+    if kind == "viviani":
+        return VivianiTrajectory(
+            center=center_xyz,
+            sphere_radius_m=float(params["sphere_radius_m"]),
+            period_s=float(params["period_s"]),
+        )
     raise ValueError(f"unknown trajectory kind: {kind!r}")
 
 
@@ -39,5 +46,6 @@ __all__ = [
     "Trajectory",
     "CircleTrajectory",
     "Figure8_3DTrajectory",
+    "VivianiTrajectory",
     "build_trajectory",
 ]

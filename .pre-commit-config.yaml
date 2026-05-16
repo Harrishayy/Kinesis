@@ -7,7 +7,9 @@ repos:
       - id: check-merge-conflict
       - id: check-yaml
       - id: check-added-large-files
-        args: ["--maxkb=1000"]
+        # 5 MB: accommodates the committed viviani_residual checkpoints
+        # (best_model.zip and ppo_panda_final.zip are ~2 MB each).
+        args: ["--maxkb=5000"]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.4.10

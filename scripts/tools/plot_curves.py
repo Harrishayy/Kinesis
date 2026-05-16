@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from tensorboard.backend.event_processing import event_accumulator  # noqa: E402
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 
 
 def load_scalar(acc: event_accumulator.EventAccumulator, tag: str):
@@ -43,7 +43,7 @@ def main() -> None:
     parser.add_argument(
         "--out",
         default=None,
-        help="defaults to results/plots/<traj>/learning_curve.png",
+        help="defaults to results/<traj>/plots/learning_curve.png",
     )
     args = parser.parse_args()
 
@@ -54,9 +54,7 @@ def main() -> None:
         tb_dir = runs[-1]
     else:
         tb_dir = Path(args.tb_dir)
-    out_path = Path(
-        args.out or (REPO / "results" / "plots" / args.traj / "learning_curve.png")
-    )
+    out_path = Path(args.out or (REPO / "results" / args.traj / "plots" / "learning_curve.png"))
     print(f"[plot] reading {tb_dir}")
 
     acc = event_accumulator.EventAccumulator(

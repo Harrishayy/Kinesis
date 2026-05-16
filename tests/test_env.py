@@ -39,8 +39,7 @@ def test_reset_places_ee_near_trajectory_center(env: PandaTrackEnv) -> None:
     ee = env._ee_pos()
     center = np.asarray(env.cfg.trajectory_center_xyz)
     assert np.linalg.norm(ee - center) < 0.10, (
-        f"EE at {ee} is too far from trajectory center {center}; "
-        "home_qpos may be wrong."
+        f"EE at {ee} is too far from trajectory center {center}; home_qpos may be wrong."
     )
 
 
