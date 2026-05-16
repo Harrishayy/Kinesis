@@ -1,8 +1,9 @@
 # scripts/
 
-Public, reproducible entrypoints intended to be run by anyone who clones the repo. Currently empty — populated as milestones land:
+User-facing entrypoints. All accept `--config <name>` where `<name>` resolves to `src/kinesis/configs/{naive,residual}/<name>.yaml`.
 
-- `quick_smoke.py` — 10k-step PPO sanity check.
-- `render_trajectory.py` — visualize a target path in the MuJoCo viewer without a policy.
+- `train.py` -- PPO training; writes TensorBoard to `logs/tb/<name>/` and checkpoints to `checkpoints/<name>/`.
+- `eval.py` -- deterministic rollout; writes plots to `results/<name>/plots/` and a side-view MP4 to `results/<name>/videos/`.
+- `play.py` -- open the trained policy in MuJoCo's interactive viewer (`mjpython` required on macOS).
 
-Private one-off scripts (submission preparation, personal experiments) live in `_internal/scripts/` and are not part of the public repository.
+Utility scripts (ablations, curve plotting, multi-view rendering, IK home-pose search) live under `tools/`.
