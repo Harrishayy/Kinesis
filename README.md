@@ -6,7 +6,7 @@
 
 End-effector trajectory tracking for the **Franka Emika Panda** in MuJoCo, learned with PPO under observation noise and control delay (two uncertainties).
 
-The headline result is **residual RL on top of a damped-least-squares Jacobian-pseudoinverse IK feedforward**: the policy never has to re-learn kinematics, it learns a residual that compensates for delay, noise, and dynamics. On a Viviani curve (a 3-D figure-eight on a sphere), the residual policy reaches **6.43 mm steady-state RMS, 10.98 mm max** under σ = 2 cm observation noise + 2-step (40 ms) control delay, beating every end-to-end variant on the same curve at the same compute budget, and dropping action jerk ~4× across the board.
+The headline result is **residual RL on top of a damped-least-squares Jacobian-pseudoinverse IK feedforward**: the policy never has to re-learn kinematics, it learns a residual that compensates for delay, noise, and dynamics. On a Viviani curve (a 3-D figure-eight on a sphere), the residual policy reaches **6.43 mm steady-state RMS, 10.98 mm max** under σ = 2 cm observation noise + 2-step (40 ms) control delay, beating every end-to-end variant on the same curve at the same compute budget, and dropping action jerk ~4× across the board. The objective set personally for this project is to ensure that the RMSE is **below 10 mm**, which is obtained.
 
 ## Evidence
 
@@ -28,18 +28,34 @@ The `viviani_residual` policy tracking its native curve under the training-distr
 
 <table>
     <tr>
-      <td align="center"><video src="results/viviani_residual/videos/rollout_side.mp4" controls width="430"></video><br><sub>Side view (default eval render)</sub></td>
-      <td align="center"><video src="results/viviani_residual/videos/rollout_front.mp4" controls width="430"></video><br><sub>Front view</sub></td>
+      <td align="center"><video src="https://github.com/user-attachments/assets/41ab1958-120e-4922-8e05-f9c636bbf0d2" controls width="430"></video><br><sub>Side view (default eval render)</sub></td>
+      <td align="center"><video src="https://github.com/user-attachments/assets/ba58f3b6-022d-42d7-8b46-07242d0f5322" controls width="430"></video><br><sub>Front view</sub></td>
     </tr>
     <tr>
-      <td align="center"><video src="results/viviani_residual/videos/rollout_top.mp4" controls width="430"></video><br><sub>Top view (curve viewed along world −z)</sub></td>
-      <td align="center"><video src="results/viviani_residual/videos/rollout_bottom.mp4" controls width="430"></video><br><sub>Bottom view (curve viewed along world +z, through the table)</sub></td>
+      <td align="center"><video src="https://github.com/user-attachments/assets/7c8654d6-6e58-460c-8405-cb48749952ce" controls width="430"></video><br><sub>Top view (curve viewed along world −z)</sub></td>
+      <td align="center"><video src="https://github.com/user-attachments/assets/fe2bcc15-8470-4fea-a3ae-1975745a0859" controls width="430"></video><br><sub>Bottom view (curve viewed along world +z, through the table)</sub></td>
     </tr>
 </table>
 
-Full numbers (end-to-end vs residual, native vs zero-shot, white vs pink noise) in [`RESULTS.md`](RESULTS.md).
+Full numbers (end-to-end vs residual, native vs zero-shot, white vs pink noise, and use of residual for preliminary trajectories) in [`RESULTS.md`](RESULTS.md).
 
 ---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ## Quickstart
 
