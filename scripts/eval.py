@@ -310,7 +310,7 @@ def plot_error(traces: dict[str, np.ndarray], control_hz: float, path: Path) -> 
     t = np.arange(len(err)) / control_hz
     fig, ax = plt.subplots(figsize=(7, 3.5))
     ax.plot(t, err, linewidth=1)
-    ax.axhline(10.0, color="C3", linestyle="--", linewidth=1, label="1 cm target")
+    ax.axhline(5.0, color="C3", linestyle="--", linewidth=1, label="5 mm target")
     ax.set_xlabel("time (s)")
     ax.set_ylabel("tracking error (mm)")
     ax.grid(True, alpha=0.3)
