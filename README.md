@@ -190,9 +190,14 @@ The residual decomposition is the structural fix, following Johannink et al. (20
 a_total = clip( a_feedforward(q, target, target_vel) + a_residual(obs), ±1 )
 ```
 
-The feedforward (a 6-DoF position + orientation IK) carries everything kinematic. The policy outputs only a small correction on top, so it can spend its entire sample budget on the irreducible part of the problem: anticipating control delay, filtering observation noise, and compensating for dynamics the IK doesn't model. The original residual-RL paper uses hand-coded P-controllers or motion primitives as the feedforward; in this project the feedforward is specialised to an analytic damped-least-squares Jacobian-pseudoinverse IK, which is well-defined everywhere in the workspace (including near kinematic singularities, courtesy of the damping term) and produces an analytically smooth action signal. Empirically this is the biggest single lever in the project: same 4 M PPO steps, same noise + delay, naive end-to-end converges to **8.40 mm steady RMS** on Viviani while the residual configuration reaches **6.43 mm**, with action jerk dropping ~4× from 188 m/s³ to 49 m/s³ because the feedforward's analytic smoothness shows through into the total action.
+The feedforward (a 6-DoF position + orientation IK) carries everything kinematic. The policy outputs only a small correction on top, so it can spend its entire sample budget on the irreducible part of the problem: anticipating control delay, filtering observation noise, and compensating for dynamics the IK doesn't model. The original residual-RL paper uses hand-coded P-controllers or motion primitives as the feedforward; in this project the feedforward is specialised to an analytic damped-least-squares Jacobian-pseudoinverse IK, which is well-defined everywhere in the workspace (including near kinematic singularities, courtesy of the damping term) and produces an analytically smooth action signal.
 
-The brief explicitly rewards creative solutions over "standard" tracking RL. The standard solution is to throw PPO at the whole problem; the more interesting solution is to figure out which part of the problem doesn't need RL at all and hand that part off. The remaining subsections describe the state, action, reward, and evaluation choices that make this work in practice.
+**Evolution of the residual config.** This was reached in two stages, which is worth being upfront about:
+
+1. *Position-only baseline* (`viviani_residual`, `RESULTS.md §3`). Quadratic position reward `−w · err²`, FF orientation locked to a constant palm-down pose. **6.43 mm steady RMS**. Cleanly beat every end-to-end variant on the same curve at the same compute (best end-to-end: 8.40 mm), with action jerk dropping ~4× from 188 m/s³ to 49 m/s³ because the feedforward's analytic smoothness shows through into the total action.
+2. *6-DoF with the bounded multiplicative-exp reward* (`viviani_residual_orient`, `RESULTS.md §2` — the current headline). Switched the position reward to `w · exp(−err/σ_p) · (1 + r_ori)` from arXiv:2412.03012, added time-varying `R_target(t)` to both the FF and the reward, added orientation noise on the obs to match the position-noise channel. **0.46 mm steady position RMS, 19.0° orientation RMS** under the same uncertainty. The quadratic reward's gradient goes to zero at zero error, so the policy stops getting signal once it's within a few mm — the exponential form keeps a non-vanishing gradient all the way down. Most of the 6.43 → 0.46 mm position improvement is that reward shape change, not the orientation work itself; the orientation work delivers the optional brief item alongside.
+
+The brief explicitly rewards creative solutions over "standard" tracking RL. The standard solution is to throw PPO at the whole problem; the more interesting solution is to figure out which part of the problem doesn't need RL at all and hand that part off — then to recognise when the chosen reward shape is itself the bottleneck and replace it. The remaining subsections describe the state, action, reward, and evaluation choices that make this work in practice.
 
 ### State
 
@@ -209,21 +214,33 @@ Joint position deltas (Δq ∈ ℝ⁷), clipped to ±5° per step at 50 Hz. Torq
 
 ### Reward
 
+Two forms in the repo. The position-only baseline (`viviani_residual`, §3) uses the original quadratic form:
+
 ```
 r = - w_track * ||ee - target||²              # tracking
     - w_action_rate * ||a_t - a_{t-1}||²       # smoothness
     - w_qdot * ||q̇||²                          # smoothness
     + w_inband * 1[||ee - target|| < ε]        # shaping bonus
-    - w_orient * (1 - cos θ)                   # palm-down regulariser (legacy)
-    - w_track_R * θ_SO(3)²                     # orient configs only
-    - w_omega * ||ω_ee||²                      # orient configs only
+    - w_orient * (1 - cos θ_palm_down)         # palm-down regulariser
 ```
 
-Only the first term teaches tracking; the others are smoothness and shaping. We added them one at a time in response to failure modes seen in training: `w_qdot` after the policy started chattering through high-joint-velocity configurations, `w_inband` to break a plateau where the policy parked itself ~3 cm from the target. All weights live in the YAML so retuning is a config edit, not a code edit. The last two terms only apply to `*_orient` configs (see "Orientation tracking" below).
+The 6-DoF headline (`viviani_residual_orient`, §2) replaces the tracking + inband terms with the **bounded multiplicative-exponential** form from arXiv:2412.03012, adds an orientation channel that's gated by position quality, and an angular-rate smoothness term mirroring `w_qdot`:
+
+```
+r_pos    = exp(- ||ee - target|| / σ_p)        # σ_p = 5 cm
+r_ori    = exp(- ||log(R* Rᵀ)||_F / σ_R)        # σ_R = 2 rad
+r_track  = w_track * r_pos * (1 + r_ori)       # ∈ (0, 2·w_track]
+r        = r_track
+           - w_action_rate * ||a_t - a_{t-1}||²
+           - w_qdot * ||q̇||²
+           - w_omega * ||ω_ee||²
+```
+
+Two design choices worth flagging. **Bounded reward** — PPO advantages stay tame, KL stays inside the clip range, training doesn't diverge (a first attempt at 6-DoF with the older quadratic form combined with `−w_track_R · θ²` blew KL past 6 and never recovered). **Multiplicative gating** — orientation reward is automatically scaled by `r_pos`, so the policy can't trade position quality for orientation quality; when position is bad, orientation contribution is near zero anyway. The smoothness terms (`w_action_rate`, `w_qdot`, `w_omega`) were each added in response to specific failure modes during the position-only iteration phase. All weights live in the YAML so retuning is a config edit, not a code edit.
 
 ### Trajectory representation
 
-Each trajectory is a class with one method: `target(t) -> (pos, vel)`. The policy never sees *which* trajectory, only `target_now` and the lookahead window, which is why the same `viviani_residual` checkpoint zero-shots onto the circle at eval time (`RESULTS.md §2`). Two curves are implemented: `circle` (planar, baseline) and `viviani` (sphere-cylinder intersection, the headline test curve — a 3-D figure-eight on a sphere that exercises all 7 arm joints).
+Each trajectory is a class with two methods: `target(t) -> (pos, vel)` and (when orientation tracking is on) `orientation(t) -> R^{3×3}`. The policy never sees *which* trajectory, only `target_now` and the lookahead windows, which is why the same `viviani_residual` checkpoint zero-shots onto the circle at eval time (`RESULTS.md §3`). Two curves are implemented: `circle` (planar, baseline) and `viviani` (sphere-cylinder intersection, the headline test curve — a 3-D figure-eight on a sphere that exercises all 7 arm joints).
 
 ### Orientation tracking (optional brief item)
 
@@ -238,17 +255,19 @@ The pieces:
 - **Robustness symmetry**: the noise wrapper gains a `σ_R = 2°` axis-angle channel mirroring its `σ = 2 cm` position channel, and the existing `ActionDelayWrapper` already delays orientation effects for free (the delay is on the action, so everything downstream inherits it). Orientation tracking is graded under the same uncertainty as position, not a softer setting.
 - **Metrics**: position RMSE / max / jerk are reported as before. New rows: steady-state orientation RMSE in degrees, steady-state max, RMS `‖ω_ee‖`, and the per-period sweep range (how many degrees the target rotates) so a 5° error against a 5° sweep is distinguishable from a banal 5° error against a 60° sweep. `scripts/eval.py --noise-off` produces the ablation row.
 
-Backwards compatibility is intact: every non-`*_orient` config is unchanged, every committed checkpoint loads against the same obs space, and `make eval` still reproduces the headline 6.43 mm / 10.98 mm / 48.8 m/s³ on `viviani_residual`.
+Backwards compatibility is intact: every non-`*_orient` config is unchanged, every committed checkpoint loads against the same obs space, and the old position-only baseline still reproduces its numbers — `uv run python scripts/eval.py --config viviani_residual` prints **6.43 mm steady RMS / 10.98 mm max / 48.8 m/s³ jerk** exactly as before. `make eval` now points at the new 6-DoF headline (`viviani_residual_orient`, 0.46 mm / 19.0°); the older config remains a fully-supported entry point.
 
 ### Evaluation methodology
 
-Deterministic rollouts of the best-by-eval checkpoint, same env + wrappers as training (σ = 2 cm noise, 2-step delay), 500 steps = 2.5 periods, settle window of 1 s dropped before computing steady-state metrics. We report three:
+Deterministic rollouts of the best-by-eval checkpoint, **same env + wrappers as training** (σ = 2 cm position noise + σ = 2° rotation noise + 2-step action delay for the orient configs; σ = 2 cm + 2-step delay for the position-only ones). 500 steps = 2.5 periods, settle window of 1 s dropped before computing steady-state metrics. The reported metrics:
 
-- **Steady-state RMSE** of the 3-D position error: average tracking quality.
-- **Steady-state max**: worst-case excursion (a 6 mm RMS that spikes to 5 cm is much worse than a steady 8 mm).
+- **Steady-state position RMSE / max**: average tracking quality and worst-case excursion.
 - **Time-RMS jerk** of the TCP trace: smoothness, the proxy for whether the policy is using actuation cleanly or fighting noise.
+- **Steady-state orientation RMSE / max** (orient configs only): geodesic angle of `R_eeᵀ R_target` in degrees.
+- **`|ω|_RMS`** (orient configs only): mean magnitude of the realised EE angular velocity — orientation smoothness counterpart of jerk.
+- **`sweep`** (orient configs only): max geodesic angle from `R_target(0)` over one period, so a small θ_RMS against a tiny sweep doesn't look impressive (a 5° RMS against a 5° sweep is failure; against a 60° sweep it's useful tracking).
 
-Any single metric is gameable (RMS by sitting near the trajectory mean; max by snapping; jerk by not moving). Reporting all three keeps the policy honest.
+Any single metric is gameable (RMS by sitting near the trajectory mean; max by snapping; jerk by not moving; θ_RMS by holding still while the target rotates). Reporting all of them together keeps the policy honest. `scripts/eval.py --noise-off` produces the matching ablation row that zeroes the noise + delay at eval time — used in `RESULTS.md §2` to show the policy regresses *without* its training-distribution noise (honest signature of real noise compensation).
 
 ### Why this structure matters in robotics
 

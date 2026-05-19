@@ -101,14 +101,9 @@ noise + 2-step delay on all of it.
 
 ### Reward design
 
-The earlier position-only configs in §3 use a quadratic
-`−w_track · ‖err‖²` reward. That form fails when extended to 6-DoF
-tracking (orientation penalty dominates position by ~5000× at typical
-mid-training errors, PPO KL blows past the clip range, training diverges).
-The 6-DoF configs instead use the bounded **multiplicative-exponential**
-form from arXiv:2412.03012 — position and orientation contributions are
-multiplied, so orientation reward is automatically gated by position
-quality:
+The 6-DoF configs use the bounded **multiplicative-exponential** form from
+arXiv:2412.03012 — position and orientation contributions are multiplied,
+so orientation reward is automatically gated by position quality:
 
 ```
 r_pos   = exp(−‖ee − target‖ / σ_p)             σ_p = 5 cm
@@ -116,11 +111,28 @@ r_ori   = exp(−‖log(R* Rᵀ)‖_F / σ_R)             σ_R = 2 rad
 r_track = w_track · r_pos · (1 + r_ori)         ∈ (0, 2 · w_track]
 ```
 
-The bounded reward keeps PPO advantages tame. The multiplicative gating
+The bounded reward keeps PPO advantages tame; the multiplicative gating
 means the policy can't trade position for orientation — when position is
-bad, orientation contribution is automatically small. This single change
-(plus the orient channel) accounts for most of the position improvement
-versus §3.
+bad, orientation contribution is automatically small.
+
+**How we landed here.** The first version of the 6-DoF env reused the §3
+baseline's reward shape — a quadratic position penalty `−w_track · ‖err‖²`
+with an additive orientation penalty `−w_track_R · θ²`. That combination
+diverged in training: at typical mid-training errors the orientation term
+was ~5000× larger than the position term, PPO `approx_kl` blew past 6
+(target: under 0.05), and the policy regressed position from a reasonable
+~7 mm to ~150 mm before stabilising at a degenerate "ignore both" fixed
+point. The fix was structural, not a weight tweak — switching to the
+bounded multiplicative-exp form removed the unbounded gradient that was
+breaking the trust-region clip in the first place.
+
+This reward switch is also responsible for most of the position-tracking
+improvement versus the §3 baseline (6.43 → 0.46 mm). The quadratic form
+has gradient `−2w · err`, which vanishes at zero error — so PPO stops
+receiving signal to tighten position below a few mm. The exponential form
+keeps a non-vanishing gradient at zero error, which is enough to pull the
+policy through the noise + delay floor down to sub-millimetre RMS. The
+orientation contribution is a separate, smaller win on top of that.
 
 ### Orientation target
 
