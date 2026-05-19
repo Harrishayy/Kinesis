@@ -6,6 +6,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from kinesis.orientation import wrist_roll_R
+
+# Orientation target = palm-down with sinusoidal wrist roll about hand-z.
+# Amplitude 60° keeps the demand well inside joint 7's ±166° range (the
+# alternative look-at target would have demanded 360°/period, exceeding the
+# wrist's mechanical range and producing untrackable orientation behaviour).
+_ROLL_AMPLITUDE_RAD = np.pi / 3.0
+
 
 @dataclass(frozen=True)
 class CircleTrajectory:
@@ -38,3 +46,19 @@ class CircleTrajectory:
     def phase_sin_cos(self, t: float) -> np.ndarray:
         a = float(self._angle(t))
         return np.array([np.sin(a), np.cos(a)], dtype=np.float64)
+
+    def orientation(self, t: float) -> np.ndarray:
+        """Palm-down with sinusoidal wrist roll about hand-z.
+
+        Geodesic SO(3) sweep of `_ROLL_AMPLITUDE_RAD` per direction over one
+        position period. Mechanically feasible on the Franka (stays inside
+        joint 7's ±166° range) and a natural target for any
+        tool-axis-rotation task (polishing, painting, sanding).
+        """
+        return wrist_roll_R(t, self.period_s, _ROLL_AMPLITUDE_RAD)
+
+    def orientation_lookahead(self, t: float, n: int, dt: float) -> np.ndarray:
+        out = np.zeros((n, 3, 3), dtype=np.float64)
+        for i in range(n):
+            out[i] = wrist_roll_R(t + (i + 1) * dt, self.period_s, _ROLL_AMPLITUDE_RAD)
+        return out

@@ -3,7 +3,7 @@
 Usage:
     uv run python scripts/train.py --smoke                     # VecEnv smoke only
     uv run python scripts/train.py --timesteps 200000          # short pilot (circle)
-    uv run python scripts/train.py --config figure8_3d         # train on figure-8
+    uv run python scripts/train.py --config viviani_residual   # headline residual run
     uv run python scripts/train.py                             # full circle run
 
 TensorBoard logs to logs/tb/<traj>/, checkpoints to checkpoints/<traj>/, best
@@ -174,7 +174,7 @@ def main() -> None:
     parser.add_argument(
         "--config",
         default=None,
-        help="trajectory name (e.g. 'circle', 'figure8_3d') or path to a YAML",
+        help="trajectory name (e.g. 'circle', 'viviani', 'viviani_residual') or path to a YAML",
     )
     args = parser.parse_args()
 

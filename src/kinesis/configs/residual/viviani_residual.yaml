@@ -14,10 +14,10 @@
 # The policy is given a_ff in its observation so it knows what it is
 # correcting. With a sane feedforward, a_residual starts near zero and only
 # has to learn compensation for: control delay, observation noise, and the
-# fast direction reversal at the figure-eight self-crossing.
+# fast direction reversal at the curve's self-crossing.
 #
 # Expected: lower steady RMS than viviani_v2 (8 mm) on the same Viviani curve,
-# AND the same trained policy should track circle/figure-8 zero-shot because
+# AND the same trained policy should track the circle zero-shot because
 # the feedforward absorbs the trajectory-specific kinematics.
 
 name: viviani_residual

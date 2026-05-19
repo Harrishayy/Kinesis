@@ -1,0 +1,60 @@
+# Circle — residual RL with time-varying orientation tracking.
+#
+# Identical to viviani_residual_orient except for the trajectory section.
+# Same multiplicative-exp reward (arXiv:2412.03012) and same residual-FF tuning.
+
+name: circle_residual_orient
+
+env:
+  control_hz: 50
+  max_steps: 500
+  max_delta_rad: 0.0873
+  reset_noise_rad: 0.02
+  start_at_target: true
+  tip_offset_m: 0.1034
+  include_cartesian_velocities: true
+  lookahead_n: 8
+  lookahead_dt_s: 0.15
+  include_orientation: true
+  orient_lookahead_n: 4
+  orient_lookahead_dt_s: 0.1
+  home_qpos: [0.257813, 0.163813, -0.335467, -1.865636, 0.389176, 1.429329, -0.965127]
+
+trajectory:
+  kind: circle
+  period_s: 4.0
+  center_xyz: [0.5, 0.0, 0.4]
+  radius_m: 0.15
+
+wrappers:
+  obs_noise_sigma_m: 0.02
+  obs_noise_sigma_R_rad: 0.0349
+  action_delay_steps: 2
+
+reward:
+  w_track: 10.0
+  r_pos_scale: 0.05
+  r_ori_scale: 2.0                # widened from 0.5 — see viviani_residual_orient.yaml for rationale
+  w_action_rate: 0.1
+  w_qdot: 0.001
+  w_inband: 0.0
+  w_orient: 0.0
+  w_omega: 0.05
+
+residual_ff:
+  enabled: true
+  p_gain: 0.5
+  damping: 0.01
+  clip: 0.8
+  orient_gain: 0.1                # reverted, see viviani_residual_orient.yaml
+
+ppo:
+  total_timesteps: 4_000_000
+  n_envs: 16
+  learning_rate: 3.0e-4
+  n_steps: 2048
+  batch_size: 256                 # see viviani_residual_orient.yaml — ~5× wall-clock win on the M5
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  net_arch: [256, 256]

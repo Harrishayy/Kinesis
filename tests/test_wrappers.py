@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from kinesis.envs.panda_track import N_ARM_JOINTS, PandaTrackEnv
+from kinesis.envs.panda_track import N_ARM_JOINTS, PandaTrackConfig, PandaTrackEnv
 from kinesis.envs.wrappers import (
     EE_POS_DIM,
     EE_POS_OFFSET,
@@ -93,3 +93,42 @@ def test_combined_wrappers_run_clean(base_env: PandaTrackEnv) -> None:
         obs, r, term, trunc, info = env.step(a)
         assert np.all(np.isfinite(obs))
         assert np.isfinite(r)
+
+
+def test_obs_noise_corrupts_rotation_block_when_present() -> None:
+    cfg = PandaTrackConfig(include_orientation=True, orient_lookahead_n=4)
+    env_a = PandaTrackEnv(config=cfg, seed=0)
+    wrapped = ObsNoiseWrapper(env_a, sigma_m=0.0, seed=42, sigma_R_rad=0.05)
+    layout = env_a.obs_layout()
+    r_s, r_e = layout["R_ee_6d"]
+    rt_s, rt_e = layout["R_target_6d"]
+    la_s, la_e = layout["R_target_lookahead_6d"]
+
+    obs_w, _ = wrapped.reset(seed=0)
+    env_b = PandaTrackEnv(config=cfg, seed=0)
+    obs_b, _ = env_b.reset(seed=0)
+
+    # R_ee_6d slice differs (noisy), but R_target and lookahead slices stay
+    # clean — same convention as the position noise (corrupt measurement only).
+    assert not np.allclose(obs_w[r_s:r_e], obs_b[r_s:r_e])
+    assert np.allclose(obs_w[rt_s:rt_e], obs_b[rt_s:rt_e])
+    assert np.allclose(obs_w[la_s:la_e], obs_b[la_s:la_e])
+
+
+def test_obs_noise_rotation_sigma_zero_is_identity_on_rotation_block() -> None:
+    cfg = PandaTrackConfig(include_orientation=True)
+    env_a = PandaTrackEnv(config=cfg, seed=0)
+    wrapped = ObsNoiseWrapper(env_a, sigma_m=0.0, seed=0, sigma_R_rad=0.0)
+    obs_w, _ = wrapped.reset(seed=0)
+    env_b = PandaTrackEnv(config=cfg, seed=0)
+    obs_b, _ = env_b.reset(seed=0)
+    assert np.array_equal(obs_w, obs_b)
+
+
+def test_obs_noise_layout_lookup_handles_orientation_off() -> None:
+    """When the underlying env has no rotation block, sigma_R_rad is silently
+    inert — the wrapper just corrupts position."""
+    env = PandaTrackEnv(seed=0)
+    wrapped = ObsNoiseWrapper(env, sigma_m=0.01, seed=0, sigma_R_rad=0.05)
+    obs, _ = wrapped.reset(seed=0)
+    assert np.all(np.isfinite(obs))

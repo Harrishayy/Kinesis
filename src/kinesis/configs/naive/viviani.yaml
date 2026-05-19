@@ -17,7 +17,7 @@ env:
   tip_offset_m: 0.1034
   lookahead_n: 4
   lookahead_dt_s: 0.1
-  # Same home pose as the circle / figure-8 configs — identical workspace centre.
+  # Same home pose as the circle config — identical workspace centre.
   home_qpos: [0.257813, 0.163813, -0.335467, -1.865636, 0.389176, 1.429329, -0.965127]
 
 trajectory:

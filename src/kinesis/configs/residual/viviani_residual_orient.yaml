@@ -1,0 +1,96 @@
+# Viviani — residual RL with time-varying orientation tracking.
+#
+# Reward follows arXiv:2412.03012 (Wheeled-Quadrupedal Manipulator pose
+# tracking): bounded exponential kernels multiplied together, so orientation
+# only contributes when position is already small:
+#
+#   r_pos   = exp(-||ee - target|| / σ_p)
+#   r_ori   = exp(-||log(R*Rᵀ)||_F / σ_R)
+#   r_track = w_track · r_pos · (1 + r_ori)        ∈ (0, 2·w_track]
+#
+# The angular-rate smoothness penalty mirrors w_qdot for joint velocities.
+# Obs noise has a σ_R = 2° axis-angle channel mirroring the σ = 2 cm position
+# channel, and the 2-step action delay applies to orientation automatically
+# (delaying the action delays all downstream effects).
+#
+# The residual FF still runs the 6-DoF damped-LS IK but with a weak
+# orient_gain (0.1) — it provides null-space stabilisation rather than active
+# orientation tracking, leaving the residual policy to do most of the
+# orientation work. This is the structurally-cleanest decomposition for a
+# time-varying R_target(t).
+#
+# First attempt at this config used quadratic position + quadratic orient
+# penalties with w_track_R=2.0 and orient_gain=0.5. Training diverged:
+# approx_kl ~6, position regressed 23×. The multiplicative-exp form here is
+# the literature-standard fix.
+
+name: viviani_residual_orient
+
+env:
+  control_hz: 50
+  max_steps: 500
+  max_delta_rad: 0.0873
+  reset_noise_rad: 0.02
+  start_at_target: true
+  tip_offset_m: 0.1034
+  include_cartesian_velocities: true
+  lookahead_n: 8
+  lookahead_dt_s: 0.15
+  include_orientation: true
+  orient_lookahead_n: 4
+  orient_lookahead_dt_s: 0.1
+  home_qpos: [0.257813, 0.163813, -0.335467, -1.865636, 0.389176, 1.429329, -0.965127]
+
+trajectory:
+  kind: viviani
+  period_s: 4.0
+  center_xyz: [0.5, 0.0, 0.4]
+  sphere_radius_m: 0.12
+
+wrappers:
+  obs_noise_sigma_m: 0.02
+  obs_noise_sigma_R_rad: 0.0349   # ≈ 2°, mirrors the σ = 2 cm position channel
+  action_delay_steps: 2
+
+reward:
+  w_track: 10.0                   # gain on the bounded r_pos · (1 + r_ori) signal
+  r_pos_scale: 0.05               # σ_p in metres (5 cm)
+  # σ_R = 2.0 rad (~115°), much wider than the typical "tight tracking"
+  # value of ~0.5. Reason: orientation can start ~90° from R_target(0)
+  # (palm-down home pose vs look-at target), and exp(-π/2 / 0.5) ≈ 0.04 was
+  # giving a vanishingly small gradient there. Widening to 2.0 keeps r_ori
+  # ≥ 0.21 across the full SO(3) error range (worst case θ=π gives 0.21),
+  # so the policy gets a usable orientation gradient from cold start.
+  r_ori_scale: 2.0
+  w_action_rate: 0.1
+  w_qdot: 0.001
+  w_inband: 0.0                   # subsumed by r_pos
+  w_orient: 0.0                   # legacy palm-down regulariser off
+  w_omega: 0.05                   # angular-rate smoothness, mirrors w_qdot
+
+residual_ff:
+  enabled: true
+  p_gain: 0.5
+  damping: 0.01
+  clip: 0.8
+  # Reverted to 0.1 (iter 3 with 0.5 regressed position without helping
+  # orient). Iter 2 with 0.1 produced 1.69 mm steady RMS — the best
+  # position result; keep that and chase orient via reward instead.
+  orient_gain: 0.1
+
+ppo:
+  total_timesteps: 4_000_000
+  n_envs: 16
+  learning_rate: 3.0e-4
+  n_steps: 2048
+  # Bumped from 64 → 256 for wall-clock: with 32768 samples per rollout we now
+  # run 128 minibatches × 10 epochs = 1280 SGD steps per iteration (down from
+  # 5120). Benchmarked at 5843 env-steps/s on the M5 (vs 1130 fps at
+  # batch_size=64) — ~5× speedup with no measurable PPO-quality regression at
+  # this batch:samples ratio. Pretrained MPS path tried and rejected (2.6×
+  # slower; CPU↔GPU transfer overhead dominates a [256, 256] MLP).
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  net_arch: [256, 256]

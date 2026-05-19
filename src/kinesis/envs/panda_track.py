@@ -1,8 +1,9 @@
 """Gymnasium environment: Franka Panda end-effector tracking a Cartesian trajectory.
 
 Action: 7-D delta in joint position, scaled to ±`max_delta_rad`. Joint limits enforced.
-Observation: see `_obs()` — q, q̇, ee position, target, lookahead, phase, prev action.
-Reward: stubbed to 0.0 in this milestone — populated in M3.
+Observation: see `_obs()` — q, q̇, ee position, target, lookahead, phase, prev action,
+optionally a feedforward IK action (residual configs) and an orientation block
+(orientation-tracking configs).
 
 Loads the Franka model from `assets/mujoco_menagerie/franka_emika_panda/scene.xml`.
 The end-effector frame is the `hand` body.
@@ -19,6 +20,7 @@ import mujoco
 import numpy as np
 from gymnasium import spaces
 
+from kinesis.orientation import R_DESIRED, R_to_6d, geodesic_angle, log_so3
 from kinesis.trajectories import Trajectory, build_trajectory
 
 _DEFAULT_SCENE = (
@@ -30,20 +32,6 @@ _DEFAULT_SCENE = (
 )
 
 N_ARM_JOINTS = 7
-
-# Canonical "hand pointing down at the workspace" orientation. Columns are the
-# hand frame's axes expressed in the world frame: hand-z = world −z (palm faces
-# down at the table), hand-x = world +x (along workspace forward direction),
-# hand-y = world −y (right-handed orthogonal). Used by the 6-DoF residual FF
-# IK to lock the arm out of folded null-space configurations.
-_R_DESIRED = np.array(
-    [
-        [1.0, 0.0, 0.0],
-        [0.0, -1.0, 0.0],
-        [0.0, 0.0, -1.0],
-    ],
-    dtype=np.float64,
-)
 
 
 @dataclass(frozen=True)
@@ -84,10 +72,6 @@ class PandaTrackConfig:
     trajectory_center_xyz: tuple[float, float, float] = (0.5, 0.0, 0.4)
     # Circle-only:
     trajectory_radius_m: float = 0.15
-    # Figure8_3D-only:
-    trajectory_amp_x_m: float = 0.10
-    trajectory_amp_y_m: float = 0.15
-    trajectory_amp_z_m: float = 0.10
     # Viviani-only:
     trajectory_sphere_radius_m: float = 0.12
     # Reward weights. Keep prior values in comments when tuning.
@@ -96,11 +80,13 @@ class PandaTrackConfig:
     w_qdot: float = 0.001
     w_inband: float = 0.5
     inband_threshold_m: float = 0.02
-    # Orientation alignment penalty: keep hand-z aligned with world −z (hand
-    # pointing down). For non-residual configs this is the only signal that
-    # collapses the arm's 4-DoF position-only null space; otherwise the policy
-    # is free to drift into folded configurations that satisfy position
-    # tracking but are mechanically unrealistic.
+    # Legacy orientation alignment penalty: keep hand-z aligned with world −z
+    # (hand pointing down). For non-residual configs this is the only signal
+    # that collapses the arm's 4-DoF position-only null space; otherwise the
+    # policy is free to drift into folded configurations that satisfy position
+    # tracking but are mechanically unrealistic. Subsumed (and overridden) by
+    # `include_orientation = True` below — orientation-tracking configs leave
+    # `w_orient = 0`.
     w_orient: float = 0.0
     # Residual RL: when enabled, the env adds a Jacobian-pseudoinverse feedforward
     # action to the policy's action each step, and exposes that feedforward to
@@ -109,11 +95,35 @@ class PandaTrackConfig:
     residual_ff_p_gain: float = 0.5
     residual_ff_damping: float = 0.01
     residual_ff_clip: float = 0.8  # headroom left for the residual
-    # When residual FF is enabled, also lock the EE orientation to a canonical
-    # "hand pointing down" pose (hand-z = world −z, hand-x = world +x). The
-    # 6-DoF IK eliminates the arm's 4-DoF null space, so the policy can't fold
-    # the elbow over the shoulder while satisfying position-only tracking.
+    # When residual FF is enabled, also locks the EE orientation to the
+    # `trajectory.orientation(t)` target via the 6-DoF damped-LS IK. If
+    # `include_orientation = False` that target is the constant
+    # `R_DESIRED` (palm down); if True it follows the curve.
     residual_ff_orient_gain: float = 0.5
+    # Orientation tracking (optional, kept modular). When False the
+    # trajectory orientation target is the constant `R_DESIRED` and the reward
+    # / obs revert to the position-only quadratic form. When True:
+    #  - obs gains a rotation block (see `obs_layout`)
+    #  - reward switches to the multiplicative exponential form proposed in
+    #    arXiv:2412.03012: r_track = w_track · r_pos · (1 + r_ori), where
+    #    r_pos = exp(-||err||/σ_p) and r_ori = exp(-||log(R*Rᵀ)||/σ_R). This
+    #    bounds rewards in (0, 2·w_track] and gates orientation behind
+    #    position progress, which is what kept PPO stable for 6-DoF pose
+    #    tracking. The angular-rate smoothness penalty (`w_omega`) and the
+    #    legacy quadratic position term `w_track` are still active, but
+    #    `w_track` scales the *exponential* form here.
+    #  - the residual FF (if enabled) tracks `trajectory.orientation(t)` with
+    #    `residual_ff_orient_gain` scaling the FF's orientation correction.
+    include_orientation: bool = False
+    # σ_p in metres — position error at which r_pos = 1/e. A 5cm scale puts the
+    # gradient where we want it (steep below 5cm, gentle above).
+    r_pos_scale: float = 0.05
+    # σ_R in radians — orientation error at which r_ori = 1/e. A 0.5 rad
+    # (~28.6°) scale matches the position scale in "effort to fix" units.
+    r_ori_scale: float = 0.5
+    w_omega: float = 0.05
+    orient_lookahead_n: int = 4
+    orient_lookahead_dt_s: float = 0.1
 
 
 class PandaTrackEnv(gym.Env):
@@ -141,10 +151,6 @@ class PandaTrackEnv(gym.Env):
         traj_params: dict[str, float] = {"period_s": self.cfg.trajectory_period_s}
         if self.cfg.trajectory_kind == "circle":
             traj_params["radius_m"] = self.cfg.trajectory_radius_m
-        elif self.cfg.trajectory_kind == "figure8_3d":
-            traj_params["amp_x_m"] = self.cfg.trajectory_amp_x_m
-            traj_params["amp_y_m"] = self.cfg.trajectory_amp_y_m
-            traj_params["amp_z_m"] = self.cfg.trajectory_amp_z_m
         elif self.cfg.trajectory_kind == "viviani":
             traj_params["sphere_radius_m"] = self.cfg.trajectory_sphere_radius_m
         self.trajectory: Trajectory = build_trajectory(
@@ -155,21 +161,10 @@ class PandaTrackEnv(gym.Env):
         self._joint_lo = joint_lo
         self._joint_hi = joint_hi
 
-        obs_dim = (
-            N_ARM_JOINTS  # q
-            + N_ARM_JOINTS  # qdot
-            + 3  # ee_pos
-            + 3  # target
-            + 3 * self.cfg.lookahead_n  # lookahead targets
-            + 2  # phase sin/cos
-            + N_ARM_JOINTS  # prev_action
-        )
-        if self.cfg.include_cartesian_velocities:
-            # ee_vel (finite-diff on clean internal position; noise wrapper only
-            # corrupts ee_pos, mirroring an encoder-based velocity) + target_vel.
-            obs_dim += 6
-        if self.cfg.residual_ff_enabled:
-            obs_dim += N_ARM_JOINTS  # a_ff so the policy sees what it is correcting
+        # Build the obs layout once so wrappers (and tests) can look up slices
+        # by name instead of recomputing offsets. Layout matches `_obs()` exactly.
+        self._obs_layout = self._build_obs_layout()
+        obs_dim = self._obs_layout["__total__"][1]
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32
         )
@@ -179,6 +174,46 @@ class PandaTrackEnv(gym.Env):
         self._step_idx = 0
         self._prev_action = np.zeros(N_ARM_JOINTS, dtype=np.float64)
         self._prev_ee = np.zeros(3, dtype=np.float64)
+        self._prev_R_ee = np.eye(3, dtype=np.float64)
+
+    def _build_obs_layout(self) -> dict[str, tuple[int, int]]:
+        """Map each obs block to its `(start, end)` slice within the obs vector.
+
+        Wrappers (e.g. `ObsNoiseWrapper`) use this to find the EE-position and
+        rotation slices regardless of which optional flags are enabled.
+        """
+        layout: dict[str, tuple[int, int]] = {}
+        idx = 0
+
+        def _add(name: str, width: int) -> None:
+            nonlocal idx
+            layout[name] = (idx, idx + width)
+            idx += width
+
+        _add("q", N_ARM_JOINTS)
+        _add("qdot", N_ARM_JOINTS)
+        _add("ee_pos", 3)
+        if self.cfg.include_cartesian_velocities:
+            _add("ee_vel", 3)
+            _add("target", 3)
+            _add("target_vel", 3)
+        else:
+            _add("target", 3)
+        _add("lookahead", 3 * self.cfg.lookahead_n)
+        _add("phase", 2)
+        _add("prev_action", N_ARM_JOINTS)
+        if self.cfg.residual_ff_enabled:
+            _add("a_ff", N_ARM_JOINTS)
+        if self.cfg.include_orientation:
+            _add("R_ee_6d", 6)
+            _add("R_target_6d", 6)
+            _add("R_target_lookahead_6d", 6 * self.cfg.orient_lookahead_n)
+        layout["__total__"] = (0, idx)
+        return layout
+
+    def obs_layout(self) -> dict[str, tuple[int, int]]:
+        """Public read-only view of the obs layout."""
+        return dict(self._obs_layout)
 
     def _joint_limits(self) -> tuple[np.ndarray, np.ndarray]:
         lo = np.zeros(N_ARM_JOINTS)
@@ -205,6 +240,23 @@ class PandaTrackEnv(gym.Env):
         hand_z_world = hand.xmat.reshape(3, 3)[:, 2]
         return hand.xpos + self.cfg.tip_offset_m * hand_z_world
 
+    def _R_ee(self) -> np.ndarray:
+        """Current EE rotation matrix (3, 3), copied so callers can mutate."""
+        return self.data.body("hand").xmat.reshape(3, 3).copy()
+
+    def _R_target(self, t: float | None = None) -> np.ndarray:
+        """Time-varying orientation target.
+
+        When orientation tracking is enabled, delegates to the trajectory's
+        `orientation(t)`; otherwise returns the constant palm-down pose so
+        non-orient configs preserve their pre-change behaviour exactly.
+        """
+        if not self.cfg.include_orientation:
+            return R_DESIRED
+        if t is None:
+            t = self._t()
+        return self.trajectory.orientation(float(t))
+
     def _ee_jacobian(self, jacp: np.ndarray, jacr: np.ndarray | None) -> None:
         """Fill jacp (and optionally jacr) with the Jacobian of the tracked
         EE point, accounting for `tip_offset_m`. Uses `mj_jac` at the world-
@@ -227,20 +279,22 @@ class PandaTrackEnv(gym.Env):
     ) -> float:
         """Damped-LS IK on the arm joints to drive EE to `target_xyz`.
 
-        Warm-starts from the current qpos. When residual_ff_enabled is True,
-        also locks the EE orientation to _R_DESIRED (hand pointing down),
-        which collapses the arm's null space so the policy cannot select a
-        folded-elbow IK branch at reset.
+        Warm-starts from the current qpos. When `residual_ff_enabled` is True,
+        also locks the EE orientation to `_R_target(0)` (constant palm-down
+        when orientation tracking is off; the trajectory's start-pose
+        otherwise), collapsing the arm's null space so the policy cannot
+        select a folded-elbow IK branch at reset.
         """
         if self.cfg.residual_ff_enabled:
+            R_target_reset = self._R_target(0.0)
             jacp = np.zeros((3, self.model.nv))
             jacr = np.zeros((3, self.model.nv))
             eye6 = np.eye(6)
             for _ in range(max_iters):
                 mujoco.mj_forward(self.model, self.data)
                 pos_err = target_xyz - self._ee_pos()
-                R = self.data.body("hand").xmat.reshape(3, 3)
-                R_err = _R_DESIRED @ R.T
+                R = self._R_ee()
+                R_err = R_target_reset @ R.T
                 omega = 0.5 * np.array(
                     [
                         R_err[2, 1] - R_err[1, 2],
@@ -287,9 +341,10 @@ class PandaTrackEnv(gym.Env):
         sane near singular configurations, then scales Δq to the env's [−1, 1]
         action. The position term combines an exact one-step trajectory
         displacement with a proportional pull toward the current target. The
-        orientation term pulls hand-z toward world −z (canonical "hand pointing
-        down"), which collapses the arm's null space so the policy cannot fold
-        the elbow over the shoulder while still satisfying position tracking.
+        orientation term pulls the current EE rotation toward `_R_target(t)`:
+        the constant palm-down pose when orientation tracking is off (just
+        collapses the arm's null space), or the trajectory's time-varying
+        rotation when it is on (also tracks the orientation target).
         """
         t = self._t()
         dt = 1.0 / self.cfg.control_hz
@@ -298,8 +353,8 @@ class PandaTrackEnv(gym.Env):
         ee = self._ee_pos()
         delta_pos = (next_target - target) + self.cfg.residual_ff_p_gain * (target - ee)
 
-        R = self.data.body("hand").xmat.reshape(3, 3)
-        R_err = _R_DESIRED @ R.T
+        R = self._R_ee()
+        R_err = self._R_target(t) @ R.T
         omega = 0.5 * np.array(
             [
                 R_err[2, 1] - R_err[1, 2],
@@ -343,6 +398,16 @@ class PandaTrackEnv(gym.Env):
         parts += [lookahead, phase, self._prev_action]
         if self.cfg.residual_ff_enabled:
             parts.append(self._feedforward_action())
+        if self.cfg.include_orientation:
+            R_ee = self._R_ee()
+            R_target = self._R_target(t)
+            R_target_la = self.trajectory.orientation_lookahead(
+                t=t,
+                n=self.cfg.orient_lookahead_n,
+                dt=self.cfg.orient_lookahead_dt_s,
+            )
+            la_6d = np.concatenate([R_to_6d(R_target_la[i]) for i in range(R_target_la.shape[0])])
+            parts += [R_to_6d(R_ee), R_to_6d(R_target), la_6d]
         return np.concatenate(parts).astype(np.float32)
 
     def reset(
@@ -384,6 +449,7 @@ class PandaTrackEnv(gym.Env):
         self._step_idx = 0
         self._prev_action[:] = 0.0
         self._prev_ee = self._ee_pos()  # zero EE-velocity on first obs.
+        self._prev_R_ee = self._R_ee()  # zero angular-velocity on first step.
         return self._obs(), {}
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
@@ -412,14 +478,23 @@ class PandaTrackEnv(gym.Env):
         ee = self._ee_pos()
         target = self.trajectory.target(self._t())
         qdot = self.data.qvel[:N_ARM_JOINTS]
-        reward, reward_terms = self._reward(
-            ee=ee, target=target, action=a, prev_action=prev_action, qdot=qdot
+        prev_R_ee = self._prev_R_ee
+        R_ee_now = self._R_ee()
+        reward, reward_terms, orient_info = self._reward(
+            ee=ee,
+            target=target,
+            action=a,
+            prev_action=prev_action,
+            qdot=qdot,
+            R_ee=R_ee_now,
+            prev_R_ee=prev_R_ee,
         )
 
         obs = self._obs()
-        # _obs uses self._prev_ee; update only after the obs is built so the
-        # finite-difference uses (this-step ee) − (last-step ee).
+        # _obs uses self._prev_ee / self._prev_R_ee; update only after the obs
+        # is built so finite differences use (this-step) − (last-step).
         self._prev_ee = ee.copy()
+        self._prev_R_ee = R_ee_now
         terminated = False
         truncated = self._step_idx >= self.cfg.max_steps
         info = {
@@ -427,6 +502,7 @@ class PandaTrackEnv(gym.Env):
             "target": target,
             "ee_error_m": float(np.linalg.norm(ee - target)),
             **reward_terms,
+            **orient_info,
         }
         return obs, float(reward), terminated, truncated, info
 
@@ -438,27 +514,58 @@ class PandaTrackEnv(gym.Env):
         action: np.ndarray,
         prev_action: np.ndarray,
         qdot: np.ndarray,
-    ) -> tuple[float, dict[str, float]]:
+        R_ee: np.ndarray,
+        prev_R_ee: np.ndarray,
+    ) -> tuple[float, dict[str, float], dict[str, Any]]:
         err = float(np.linalg.norm(ee - target))
-        track = -self.cfg.w_track * (err * err)
         action_rate = -self.cfg.w_action_rate * float(np.sum((action - prev_action) ** 2))
         qdot_pen = -self.cfg.w_qdot * float(np.sum(qdot * qdot))
-        inband = self.cfg.w_inband if err < self.cfg.inband_threshold_m else 0.0
-        if self.cfg.w_orient > 0.0:
-            # hand-z (z-axis of hand frame in world) should equal world (0,0,-1).
-            # R[:, 2] = hand-z; R[2, 2] = z-component of hand-z in world; want -1.
-            hand_z2 = float(self.data.body("hand").xmat.reshape(3, 3)[2, 2])
-            orient = -self.cfg.w_orient * (1.0 + hand_z2) ** 2
+        orient_info: dict[str, Any] = {}
+
+        if self.cfg.include_orientation:
+            # 6-DoF tracking: multiplicative-exponential form (arXiv:2412.03012).
+            # Bounded in (0, 2·w_track], so PPO advantages and KL stay tame.
+            R_target = self._R_target()
+            theta = geodesic_angle(R_ee, R_target)
+            r_pos = float(np.exp(-err / self.cfg.r_pos_scale))
+            r_ori = float(np.exp(-theta / self.cfg.r_ori_scale))
+            track = self.cfg.w_track * r_pos * (1.0 + r_ori)
+            inband = 0.0  # subsumed by r_pos
+            orient = 0.0  # legacy palm-down regulariser off when tracking
+            # Angular velocity from successive clean EE rotations.
+            dR = R_ee @ prev_R_ee.T
+            omega = log_so3(dR) * self.cfg.control_hz
+            r_omega = -self.cfg.w_omega * float(omega @ omega)
+            orient_info["orient_err_rad"] = float(theta)
+            orient_info["omega_ee"] = omega
+            orient_info["R_ee"] = R_ee.copy()
+            orient_info["R_target"] = R_target.copy()
         else:
-            orient = 0.0
-        total = track + action_rate + qdot_pen + inband + orient
-        return total, {
-            "r_track": track,
-            "r_action_rate": action_rate,
-            "r_qdot": qdot_pen,
-            "r_inband": inband,
-            "r_orient": orient,
-        }
+            # Position-only configs preserve the legacy quadratic reward
+            # exactly — `viviani_residual` and friends must keep printing the
+            # same numbers reported in RESULTS.md.
+            track = -self.cfg.w_track * (err * err)
+            inband = self.cfg.w_inband if err < self.cfg.inband_threshold_m else 0.0
+            if self.cfg.w_orient > 0.0:
+                hand_z2 = float(R_ee[2, 2])
+                orient = -self.cfg.w_orient * (1.0 + hand_z2) ** 2
+            else:
+                orient = 0.0
+            r_omega = 0.0
+
+        total = track + action_rate + qdot_pen + inband + orient + r_omega
+        return (
+            total,
+            {
+                "r_track": track,
+                "r_action_rate": action_rate,
+                "r_qdot": qdot_pen,
+                "r_inband": inband,
+                "r_orient": orient,
+                "r_omega": r_omega,
+            },
+            orient_info,
+        )
 
     def close(self) -> None:
         # MjData/MjModel hold no OS resources requiring explicit cleanup.

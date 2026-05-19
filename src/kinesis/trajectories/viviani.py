@@ -23,6 +23,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from kinesis.orientation import wrist_roll_R
+
+# Same feasible wrist-roll orientation target as the circle trajectory — see
+# circle.py for the rationale (joint 7's ±166° limit makes a 360°-per-period
+# look-at sweep mechanically untrackable).
+_ROLL_AMPLITUDE_RAD = np.pi / 3.0
+
 
 @dataclass(frozen=True)
 class VivianiTrajectory:
@@ -58,3 +65,13 @@ class VivianiTrajectory:
     def phase_sin_cos(self, t: float) -> np.ndarray:
         a = 2.0 * np.pi * (float(t) % self.period_s) / self.period_s
         return np.array([np.sin(a), np.cos(a)], dtype=np.float64)
+
+    def orientation(self, t: float) -> np.ndarray:
+        """Palm-down with sinusoidal wrist roll about hand-z. See circle.py."""
+        return wrist_roll_R(t, self.period_s, _ROLL_AMPLITUDE_RAD)
+
+    def orientation_lookahead(self, t: float, n: int, dt: float) -> np.ndarray:
+        out = np.zeros((n, 3, 3), dtype=np.float64)
+        for i in range(n):
+            out[i] = wrist_roll_R(t + (i + 1) * dt, self.period_s, _ROLL_AMPLITUDE_RAD)
+        return out

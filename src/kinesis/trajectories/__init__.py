@@ -5,6 +5,10 @@ Every trajectory exposes:
 - `lookahead(t, n, dt)` — stacked future positions, shape (n, 3).
 - `phase_sin_cos(t)`    — (sin, cos) of the trajectory phase. Exposed to the
   policy so it is stateless w.r.t. which trajectory it is tracking.
+- `orientation(t)`      — target rotation matrix at `t`. Default is the
+  constant "hand pointing down" pose; subclasses override for curve-specific
+  orientation tracking.
+- `orientation_lookahead(t, n, dt)` — stacked future rotations, shape (n, 3, 3).
 """
 
 from __future__ import annotations
@@ -13,7 +17,6 @@ from typing import Any
 
 from kinesis.trajectories.base import Trajectory
 from kinesis.trajectories.circle import CircleTrajectory
-from kinesis.trajectories.figure8_3d import Figure8_3DTrajectory
 from kinesis.trajectories.viviani import VivianiTrajectory
 
 
@@ -23,14 +26,6 @@ def build_trajectory(kind: str, center_xyz, **params: Any) -> Trajectory:
         return CircleTrajectory(
             center=center_xyz,
             radius=float(params["radius_m"]),
-            period_s=float(params["period_s"]),
-        )
-    if kind == "figure8_3d":
-        return Figure8_3DTrajectory(
-            center=center_xyz,
-            amp_x_m=float(params["amp_x_m"]),
-            amp_y_m=float(params["amp_y_m"]),
-            amp_z_m=float(params["amp_z_m"]),
             period_s=float(params["period_s"]),
         )
     if kind == "viviani":
@@ -45,7 +40,6 @@ def build_trajectory(kind: str, center_xyz, **params: Any) -> Trajectory:
 __all__ = [
     "Trajectory",
     "CircleTrajectory",
-    "Figure8_3DTrajectory",
     "VivianiTrajectory",
     "build_trajectory",
 ]

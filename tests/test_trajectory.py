@@ -1,11 +1,19 @@
 import numpy as np
 
+from kinesis.orientation import geodesic_angle
 from kinesis.trajectories import (
     CircleTrajectory,
-    Figure8_3DTrajectory,
     VivianiTrajectory,
     build_trajectory,
 )
+
+
+def _is_so3(R: np.ndarray, atol: float = 1e-9) -> bool:
+    return (
+        R.shape == (3, 3)
+        and np.allclose(R.T @ R, np.eye(3), atol=atol)
+        and np.isclose(np.linalg.det(R), 1.0, atol=atol)
+    )
 
 
 def _circle() -> CircleTrajectory:
@@ -38,46 +46,6 @@ def test_phase_unit_circle():
     for t in np.linspace(0.0, 4.0, 9):
         s, c = traj.phase_sin_cos(float(t))
         assert np.isclose(s * s + c * c, 1.0)
-
-
-def _figure8() -> Figure8_3DTrajectory:
-    return Figure8_3DTrajectory(
-        center=np.array([0.5, 0.0, 0.4]),
-        amp_x_m=0.10,
-        amp_y_m=0.15,
-        amp_z_m=0.10,
-        period_s=4.0,
-    )
-
-
-def test_figure8_period_closes_loop():
-    traj = _figure8()
-    assert np.allclose(traj.target(0.0), traj.target(traj.period_s))
-
-
-def test_figure8_crosses_center_in_y_at_quarter_period():
-    # y = amp_y * sin(2ωt); at t = T/2 → 2ωt = 2π → sin = 0. The figure-eight
-    # crosses the centre line at half-period.
-    traj = _figure8()
-    p = traj.target(traj.period_s / 2.0)
-    assert np.isclose(p[1], traj.center[1], atol=1e-12)
-
-
-def test_figure8_spans_all_three_axes():
-    traj = _figure8()
-    samples = np.stack([traj.target(float(t)) for t in np.linspace(0.0, traj.period_s, 64)])
-    span = samples.max(axis=0) - samples.min(axis=0)
-    assert span[0] > 0.15  # ~2 * amp_x
-    assert span[1] > 0.25  # ~2 * amp_y
-    assert span[2] > 0.15  # ~2 * amp_z
-
-
-def test_figure8_lookahead_matches_target():
-    traj = _figure8()
-    la = traj.lookahead(t=0.0, n=3, dt=0.1)
-    assert la.shape == (3, 3)
-    for i in range(3):
-        assert np.allclose(la[i], traj.target(0.1 * (i + 1)))
 
 
 def _viviani() -> VivianiTrajectory:
@@ -148,18 +116,86 @@ def test_viviani_phase_unit_circle_and_unique_per_period():
     assert len(set(phases)) == len(phases)
 
 
+def test_circle_orientation_is_valid_so3_everywhere():
+    traj = _circle()
+    for t in np.linspace(0.0, traj.period_s, 32, endpoint=False):
+        R = traj.orientation(float(t))
+        assert _is_so3(R, atol=1e-9)
+
+
+def test_circle_orientation_hand_z_stays_palm_down():
+    """Sinusoidal wrist-roll target keeps hand-z aligned with world −z; only
+    rotation about hand-z varies."""
+    traj = _circle()
+    for t in np.linspace(0.0, traj.period_s, 16, endpoint=False):
+        R = traj.orientation(float(t))
+        assert np.allclose(R[:, 2], np.array([0.0, 0.0, -1.0]), atol=1e-9)
+
+
+def test_circle_orientation_continuous():
+    traj = _circle()
+    eps = 1e-3
+    for t in np.linspace(0.0, traj.period_s, 8, endpoint=False):
+        R0 = traj.orientation(float(t))
+        R1 = traj.orientation(float(t) + eps)
+        # Geodesic angle between samples ε apart should be tiny.
+        assert geodesic_angle(R0, R1) < 1e-2
+
+
+def test_circle_orientation_amplitude_matches_60_degrees():
+    """The wrist roll target has 60° amplitude — peak deviation from t=0 is
+    at the sine peaks, where geodesic_angle should equal π/3."""
+    traj = _circle()
+    R0 = traj.orientation(0.0)
+    R_quarter = traj.orientation(traj.period_s / 4.0)  # sin peak
+    assert np.isclose(geodesic_angle(R0, R_quarter), np.pi / 3, atol=1e-6)
+    # Trough.
+    R_three_quarter = traj.orientation(3.0 * traj.period_s / 4.0)
+    assert np.isclose(geodesic_angle(R0, R_three_quarter), np.pi / 3, atol=1e-6)
+
+
+def test_circle_orientation_lookahead_matches_per_step():
+    traj = _circle()
+    la = traj.orientation_lookahead(t=0.0, n=4, dt=0.1)
+    assert la.shape == (4, 3, 3)
+    for i in range(4):
+        assert np.allclose(la[i], traj.orientation(0.1 * (i + 1)), atol=1e-12)
+
+
+def test_viviani_orientation_is_valid_so3_everywhere():
+    traj = _viviani()
+    for t in np.linspace(0.0, traj.period_s, 64, endpoint=False):
+        R = traj.orientation(float(t))
+        assert _is_so3(R, atol=1e-9)
+
+
+def test_viviani_orientation_hand_z_stays_palm_down():
+    traj = _viviani()
+    for t in np.linspace(0.0, traj.period_s, 16, endpoint=False):
+        R = traj.orientation(float(t))
+        assert np.allclose(R[:, 2], np.array([0.0, 0.0, -1.0]), atol=1e-9)
+
+
+def test_viviani_orientation_continuous():
+    traj = _viviani()
+    eps = 1e-3
+    for t in np.linspace(0.0, traj.period_s, 16, endpoint=False):
+        R0 = traj.orientation(float(t))
+        R1 = traj.orientation(float(t) + eps)
+        assert geodesic_angle(R0, R1) < 1e-2
+
+
+def test_viviani_orientation_lookahead_matches_per_step():
+    traj = _viviani()
+    la = traj.orientation_lookahead(t=0.0, n=4, dt=0.1)
+    assert la.shape == (4, 3, 3)
+    for i in range(4):
+        assert np.allclose(la[i], traj.orientation(0.1 * (i + 1)), atol=1e-12)
+
+
 def test_build_trajectory_dispatches():
     c = build_trajectory("circle", np.array([0.5, 0.0, 0.4]), radius_m=0.15, period_s=4.0)
     assert isinstance(c, CircleTrajectory)
-    f = build_trajectory(
-        "figure8_3d",
-        np.array([0.5, 0.0, 0.4]),
-        amp_x_m=0.1,
-        amp_y_m=0.15,
-        amp_z_m=0.1,
-        period_s=4.0,
-    )
-    assert isinstance(f, Figure8_3DTrajectory)
     v = build_trajectory(
         "viviani",
         np.array([0.5, 0.0, 0.4]),

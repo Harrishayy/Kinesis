@@ -2,6 +2,18 @@ import numpy as np
 import pytest
 
 from kinesis.envs.panda_track import N_ARM_JOINTS, PandaTrackConfig, PandaTrackEnv
+from kinesis.orientation import R_DESIRED
+
+
+def _reward_kwargs(**overrides):
+    """Default kwargs for `_reward(...)`. Identity rotations make the
+    orientation terms zero so legacy reward tests stay unchanged in spirit."""
+    base = {
+        "R_ee": R_DESIRED.copy(),
+        "prev_R_ee": R_DESIRED.copy(),
+    }
+    base.update(overrides)
+    return base
 
 
 @pytest.fixture(scope="module")
@@ -46,12 +58,14 @@ def test_reset_places_ee_near_trajectory_center(env: PandaTrackEnv) -> None:
 def test_reward_inband_dominates_when_on_target(env: PandaTrackEnv) -> None:
     zero7 = np.zeros(7)
     on_target = np.array([0.5, 0.0, 0.4])
-    r, terms = env._reward(
-        ee=on_target,
-        target=on_target,
-        action=zero7,
-        prev_action=zero7,
-        qdot=zero7,
+    r, terms, _ = env._reward(
+        **_reward_kwargs(
+            ee=on_target,
+            target=on_target,
+            action=zero7,
+            prev_action=zero7,
+            qdot=zero7,
+        )
     )
     assert terms["r_track"] == 0.0
     assert terms["r_action_rate"] == 0.0
@@ -64,12 +78,14 @@ def test_reward_strongly_negative_when_far(env: PandaTrackEnv) -> None:
     zero7 = np.zeros(7)
     target = np.array([0.5, 0.0, 0.4])
     far_ee = target + np.array([0.5, 0.0, 0.0])  # 50 cm off
-    r, terms = env._reward(
-        ee=far_ee,
-        target=target,
-        action=zero7,
-        prev_action=zero7,
-        qdot=zero7,
+    r, terms, _ = env._reward(
+        **_reward_kwargs(
+            ee=far_ee,
+            target=target,
+            action=zero7,
+            prev_action=zero7,
+            qdot=zero7,
+        )
     )
     # 0.5 m error → tracking penalty = -10 * 0.25 = -2.5
     assert terms["r_track"] == pytest.approx(-2.5)
@@ -81,15 +97,61 @@ def test_reward_penalizes_action_rate(env: PandaTrackEnv) -> None:
     on_target = np.array([0.5, 0.0, 0.4])
     action = np.ones(7)
     prev = np.zeros(7)
-    _, terms = env._reward(
-        ee=on_target,
-        target=on_target,
-        action=action,
-        prev_action=prev,
-        qdot=np.zeros(7),
+    _, terms, _ = env._reward(
+        **_reward_kwargs(
+            ee=on_target,
+            target=on_target,
+            action=action,
+            prev_action=prev,
+            qdot=np.zeros(7),
+        )
     )
     # ||1-0||² summed over 7 dims = 7 → -0.1 * 7 = -0.7
     assert terms["r_action_rate"] == pytest.approx(-0.7)
+
+
+def test_obs_layout_for_default_config(env: PandaTrackEnv) -> None:
+    layout = env.obs_layout()
+    assert layout["q"] == (0, 7)
+    assert layout["qdot"] == (7, 14)
+    assert layout["ee_pos"] == (14, 17)
+    assert layout["__total__"][1] == env.observation_space.shape[0]
+    # Default config has neither cartesian velocities, residual FF, nor
+    # orientation tracking — no rotation block.
+    assert "R_ee_6d" not in layout
+
+
+def test_orient_obs_includes_rotation_block() -> None:
+    cfg = PandaTrackConfig(include_orientation=True, orient_lookahead_n=3)
+    env = PandaTrackEnv(config=cfg, seed=0)
+    layout = env.obs_layout()
+    assert "R_ee_6d" in layout
+    assert "R_target_6d" in layout
+    assert "R_target_lookahead_6d" in layout
+    s, e = layout["R_ee_6d"]
+    assert e - s == 6
+    s, e = layout["R_target_lookahead_6d"]
+    assert e - s == 6 * 3
+    obs, _ = env.reset(seed=0)
+    assert obs.shape == env.observation_space.shape
+    obs, _, _, _, info = env.step(np.zeros(7, dtype=np.float32))
+    assert "orient_err_rad" in info
+    assert 0.0 <= info["orient_err_rad"] <= np.pi
+    assert "omega_ee" in info
+    assert info["omega_ee"].shape == (3,)
+
+
+def test_disabling_orientation_keeps_obs_shape_unchanged() -> None:
+    # Sanity: enabling orientation strictly grows obs, never reorders the
+    # existing prefix — wrappers that read by offset stay correct.
+    cfg_off = PandaTrackConfig(include_orientation=False)
+    cfg_on = PandaTrackConfig(include_orientation=True, orient_lookahead_n=4)
+    env_off = PandaTrackEnv(config=cfg_off, seed=0)
+    env_on = PandaTrackEnv(config=cfg_on, seed=0)
+    off_size = env_off.observation_space.shape[0]
+    on_size = env_on.observation_space.shape[0]
+    # 6 (R_ee) + 6 (R_target) + 6*4 (lookahead) = 36 extra dims
+    assert on_size - off_size == 36
 
 
 def test_step_respects_joint_limits(env: PandaTrackEnv) -> None:

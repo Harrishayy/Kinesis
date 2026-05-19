@@ -66,9 +66,6 @@ def _panda_config(cfg: dict) -> PandaTrackConfig:
         trajectory_period_s=float(traj_c.get("period_s", 4.0)),
         trajectory_center_xyz=tuple(traj_c.get("center_xyz", (0.5, 0.0, 0.4))),
         trajectory_radius_m=float(traj_c.get("radius_m", defaults.trajectory_radius_m)),
-        trajectory_amp_x_m=float(traj_c.get("amp_x_m", defaults.trajectory_amp_x_m)),
-        trajectory_amp_y_m=float(traj_c.get("amp_y_m", defaults.trajectory_amp_y_m)),
-        trajectory_amp_z_m=float(traj_c.get("amp_z_m", defaults.trajectory_amp_z_m)),
         trajectory_sphere_radius_m=float(
             traj_c.get("sphere_radius_m", defaults.trajectory_sphere_radius_m)
         ),
@@ -77,6 +74,14 @@ def _panda_config(cfg: dict) -> PandaTrackConfig:
         w_qdot=float(rew_c.get("w_qdot", 0.001)),
         w_inband=float(rew_c.get("w_inband", 0.5)),
         w_orient=float(rew_c.get("w_orient", defaults.w_orient)),
+        w_omega=float(rew_c.get("w_omega", defaults.w_omega)),
+        r_pos_scale=float(rew_c.get("r_pos_scale", defaults.r_pos_scale)),
+        r_ori_scale=float(rew_c.get("r_ori_scale", defaults.r_ori_scale)),
+        include_orientation=bool(env_c.get("include_orientation", defaults.include_orientation)),
+        orient_lookahead_n=int(env_c.get("orient_lookahead_n", defaults.orient_lookahead_n)),
+        orient_lookahead_dt_s=float(
+            env_c.get("orient_lookahead_dt_s", defaults.orient_lookahead_dt_s)
+        ),
         residual_ff_enabled=bool(cfg.get("residual_ff", {}).get("enabled", False)),
         residual_ff_p_gain=float(
             cfg.get("residual_ff", {}).get("p_gain", defaults.residual_ff_p_gain)
@@ -85,6 +90,9 @@ def _panda_config(cfg: dict) -> PandaTrackConfig:
             cfg.get("residual_ff", {}).get("damping", defaults.residual_ff_damping)
         ),
         residual_ff_clip=float(cfg.get("residual_ff", {}).get("clip", defaults.residual_ff_clip)),
+        residual_ff_orient_gain=float(
+            cfg.get("residual_ff", {}).get("orient_gain", defaults.residual_ff_orient_gain)
+        ),
     )
 
 
@@ -100,11 +108,19 @@ def make_env(
     if apply_wrappers:
         wcfg = cfg.get("wrappers", {})
         sigma = float(wcfg.get("obs_noise_sigma_m", 0.0))
+        sigma_R = float(wcfg.get("obs_noise_sigma_R_rad", 0.0))
         delay = int(wcfg.get("action_delay_steps", 0))
         color = str(wcfg.get("noise_color", "white"))
         n_octaves = int(wcfg.get("noise_octaves", 6))
-        if sigma > 0:
-            env = ObsNoiseWrapper(env, sigma_m=sigma, seed=seed, color=color, n_octaves=n_octaves)
+        if sigma > 0 or sigma_R > 0:
+            env = ObsNoiseWrapper(
+                env,
+                sigma_m=sigma,
+                seed=seed,
+                color=color,
+                n_octaves=n_octaves,
+                sigma_R_rad=sigma_R,
+            )
         if delay > 0:
             env = ActionDelayWrapper(env, delay_steps=delay)
     return env

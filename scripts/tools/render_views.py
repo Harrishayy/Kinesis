@@ -90,6 +90,33 @@ def _add_marker(scene, *, pos, size, rgba) -> None:
     scene.ngeom += 1
 
 
+def _add_arrow(scene, *, origin, direction, length, radius, rgba) -> None:
+    """Arrow geom along `direction` (will be normalised), length `length`.
+    Mirrors `_add_arrow` in scripts/eval.py — kept duplicated so the tools/
+    directory stays independent of the main script."""
+    if scene.ngeom >= scene.maxgeom:
+        return
+    d = np.asarray(direction, dtype=np.float64).reshape(3)
+    n = float(np.linalg.norm(d))
+    if n < 1e-9:
+        return
+    z = d / n
+    up = np.array([0.0, 0.0, 1.0]) if abs(z[2]) < 0.95 else np.array([1.0, 0.0, 0.0])
+    x = up - z * (up @ z)
+    x /= max(float(np.linalg.norm(x)), 1e-12)
+    y = np.cross(z, x)
+    mat = np.column_stack([x, y, z])
+    mujoco.mjv_initGeom(
+        scene.geoms[scene.ngeom],
+        type=mujoco.mjtGeom.mjGEOM_ARROW,
+        size=np.array([radius, radius, float(length)], dtype=np.float64),
+        pos=np.asarray(origin, dtype=np.float64),
+        mat=mat.flatten(),
+        rgba=np.asarray(rgba, dtype=np.float32),
+    )
+    scene.ngeom += 1
+
+
 def _unwrap_to_panda(env) -> PandaTrackEnv:
     while not isinstance(env, PandaTrackEnv):
         env = env.env
@@ -121,13 +148,21 @@ def render_multiview(
     trail_pts = [panda.trajectory.target(float(t)) for t in trail_ts]
     ee_history: list[np.ndarray] = []
 
+    has_orient = panda.cfg.include_orientation
+    arrow_length = 0.30
+    arrow_radius_target = 0.009
+    arrow_radius_realised = 0.006
+
     try:
         obs, _ = env.reset(seed=0)
         for _ in range(n_steps):
             action, _ = model.predict(obs, deterministic=True)
             obs, _, terminated, truncated, info = env.step(action)
-            ee_history.append(np.asarray(info["ee_pos"], dtype=np.float64))
+            ee = np.asarray(info["ee_pos"], dtype=np.float64)
+            ee_history.append(ee)
             current_target = panda.trajectory.target(panda._t())
+            R_ee = np.asarray(info["R_ee"], dtype=np.float64) if has_orient else None
+            R_target = np.asarray(info["R_target"], dtype=np.float64) if has_orient else None
             for name, renderer in renderers.items():
                 renderer.update_scene(panda.data, camera=cameras[name])
                 scene = renderer.scene
@@ -138,6 +173,23 @@ def render_multiview(
                 _add_marker(
                     scene, pos=current_target, size=[0.013, 0, 0], rgba=[1.0, 0.15, 0.15, 1.0]
                 )
+                if has_orient:
+                    _add_arrow(
+                        scene,
+                        origin=ee,
+                        direction=R_target[:, 0],
+                        length=arrow_length,
+                        radius=arrow_radius_target,
+                        rgba=[1.0, 0.20, 0.85, 0.90],
+                    )
+                    _add_arrow(
+                        scene,
+                        origin=ee,
+                        direction=R_ee[:, 0],
+                        length=arrow_length,
+                        radius=arrow_radius_realised,
+                        rgba=[0.10, 0.85, 1.0, 1.00],
+                    )
                 writers[name].append_data(renderer.render())
             if terminated or truncated:
                 obs, _ = env.reset(seed=0)

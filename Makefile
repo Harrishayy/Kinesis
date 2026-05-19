@@ -1,4 +1,4 @@
-.PHONY: setup smoke train eval play test lint clean train-fig8 eval-fig8 play-fig8
+.PHONY: setup smoke train eval play test lint clean
 
 # Derive the dynamic-loader path from the venv's actual Python at invocation time
 # so the value tracks whatever uv-installed patch version is in use (3.11.x).
@@ -20,26 +20,17 @@ smoke:
 train:
 	uv run python scripts/train.py
 
-# `eval` points at the headline residual experiment. The viviani_residual best
-# checkpoint is committed (~2 MB), so this reproduces the RESULTS.md headline
-# numbers (6.43 mm steady RMS) on a fresh clone in ~10 s with no training needed.
+# `eval` points at the headline residual experiment with 6-DoF tracking
+# (position + orientation). The viviani_residual_orient best checkpoint is
+# committed (~2 MB), so this reproduces the RESULTS.md headline numbers
+# (0.46 mm steady RMS, 19.0° orientation RMS) on a fresh clone in ~10 s with
+# no training needed.
 eval:
-	uv run python scripts/eval.py --config viviani_residual
+	uv run python scripts/eval.py --config viviani_residual_orient
 
 play:
 	DYLD_LIBRARY_PATH=$(DYLD_LIBRARY_PATH) \
 	  .venv/bin/python .venv/bin/mjpython scripts/play.py $(ARGS)
-
-# Figure-8 (3D Lissajous) targets - engages all 7 arm joints.
-train-fig8:
-	uv run python scripts/train.py --config figure8_3d
-
-eval-fig8:
-	uv run python scripts/eval.py --config figure8_3d
-
-play-fig8:
-	DYLD_LIBRARY_PATH=$(DYLD_LIBRARY_PATH) \
-	  .venv/bin/python .venv/bin/mjpython scripts/play.py --config figure8_3d $(ARGS)
 
 test:
 	uv run pytest -q
@@ -48,8 +39,9 @@ lint:
 	uv run ruff check src tests scripts
 
 # Wipe training artifacts but preserve the committed headline checkpoints
-# (checkpoints/viviani_residual/best/best_model.zip + ppo_panda_final.zip)
-# so `uv run python scripts/eval.py --config viviani_residual` keeps working.
+# (checkpoints/viviani_residual_orient/best/best_model.zip — the 0.46 mm /
+# 19° headline; also viviani_residual/best/best_model.zip — preserved as the
+# earlier position-only baseline for historical reference).
 clean:
 	rm -rf logs/* results/raw/* results/scratch/*
 	find checkpoints -name 'ppo_panda_*_steps.zip' -delete 2>/dev/null || true
