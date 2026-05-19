@@ -20,7 +20,7 @@ The `viviani_residual_orient` policy tracking its native curve under the trainin
       <td align="center"><img width="430" alt="xz trace" src="results/viviani_residual_orient/plots/xz_trace.png" /><br><sub>XZ projection: depth dimension; both axes engaged, no degenerate planar reduction</sub></td>
     </tr>
     <tr>
-      <td align="center"><img width="430" alt="position error vs time" src="results/viviani_residual_orient/plots/error_vs_time.png" /><br><sub>Position tracking error across 3 trajectory periods. Steady-state (after t&gt;1 s settle window): RMS 0.46 mm, max 1.11 mm</sub></td>
+      <td align="center"><img width="430" alt="position error vs time" src="results/viviani_residual_orient/plots/error_vs_time.png" /><br><sub>Position tracking error across 3 trajectory periods (red dashed = 5 mm internal target). Steady-state (after t&gt;1 s settle window): RMS 0.46 mm, max 1.11 mm — well below the reference.</sub></td>
       <td align="center"><img width="430" alt="orientation error vs time" src="results/viviani_residual_orient/plots/orient_error_vs_time.png" /><br><sub>Orientation tracking error (geodesic angle, degrees). Steady-state RMS 19.0°, max 41° against a 60° per-period sweep</sub></td>
     </tr>
 </table>
