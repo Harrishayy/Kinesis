@@ -23,9 +23,23 @@ wandb/
 *.zip
 *.pt
 
-# Keep the headline residual-RL checkpoints (2 MB each, needed for play.py / eval.py defaults).
+# Keep the headline residual-RL checkpoints (~3 MB each, needed for play.py / eval.py defaults).
 !checkpoints/
 checkpoints/*
+# New 6-DoF headline (RESULTS.md §2): viviani_residual_orient + circle_residual_orient.
+!checkpoints/viviani_residual_orient/
+checkpoints/viviani_residual_orient/*
+!checkpoints/viviani_residual_orient/best/
+checkpoints/viviani_residual_orient/best/*
+!checkpoints/viviani_residual_orient/best/best_model.zip
+!checkpoints/viviani_residual_orient/ppo_panda_final.zip
+!checkpoints/circle_residual_orient/
+checkpoints/circle_residual_orient/*
+!checkpoints/circle_residual_orient/best/
+checkpoints/circle_residual_orient/best/*
+!checkpoints/circle_residual_orient/best/best_model.zip
+!checkpoints/circle_residual_orient/ppo_panda_final.zip
+# Earlier position-only baseline (RESULTS.md §3 + §4 noise-color), kept for reference.
 !checkpoints/viviani_residual/
 checkpoints/viviani_residual/*
 !checkpoints/viviani_residual/best/

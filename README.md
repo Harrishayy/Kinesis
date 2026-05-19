@@ -4,40 +4,43 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
 
-End-effector trajectory tracking for the **Franka Emika Panda** in MuJoCo, learned with PPO under observation noise and control delay (two uncertainties).
+End-effector **6-DoF tracking** (position + orientation) for the **Franka Emika Panda** in MuJoCo, learned with PPO under observation noise and control delay on both channels.
 
-The headline result is **residual RL on top of a damped-least-squares Jacobian-pseudoinverse IK feedforward**: the policy never has to re-learn kinematics, it learns a residual that compensates for delay, noise, and dynamics. On a Viviani curve (a 3-D figure-eight on a sphere), the residual policy reaches **6.43 mm steady-state RMS, 10.98 mm max** under σ = 2 cm observation noise + 2-step (40 ms) control delay, beating every end-to-end variant on the same curve at the same compute budget, and dropping action jerk ~4× across the board. The objective set personally for this project is to ensure that the RMSE is **below 10 mm**, which is obtained.
+The headline result is **residual RL on top of a damped-least-squares Jacobian-pseudoinverse IK feedforward**: the policy never has to re-learn kinematics, it learns a residual that compensates for delay, noise, and dynamics. On a Viviani curve (a 3-D figure-eight on a sphere) with a sinusoidal wrist-roll orientation target, the residual policy reaches **0.46 mm steady-state position RMS / 19.0° steady-state orientation RMS** under σ = 2 cm position noise, σ = 2° rotation noise, and 2-step (40 ms) control delay. The internal target for this project — sub-1 cm position RMS — is cleared by **21×**, and the optional orientation-tracking item from the brief is delivered with a meaningful working metric (60° per-period sweep, tracked to 19° steady error).
 
 ## Evidence
 
-The `viviani_residual` policy tracking its native curve under the training-distribution noise and delay. Deterministic best-by-eval rollout, 3 trajectory periods, 50 Hz control. Reproducible via `make eval` on a fresh clone using the committed checkpoint.
+The `viviani_residual_orient` policy tracking its native curve under the training-distribution noise and delay. Deterministic best-by-eval rollout, 3 trajectory periods, 50 Hz control. Reproducible via `make eval` on a fresh clone using the committed checkpoint.
 
 **Tracking plots**
 
 <table>
     <tr>
-      <td align="center"><img width="430" alt="yz trace" src="results/viviani_residual/plots/yz_trace.png" /><br><sub>YZ projection: target (blue) vs achieved TCP (orange) in the curve's primary plane</sub></td>
-      <td align="center"><img width="430" alt="xz trace" src="results/viviani_residual/plots/xz_trace.png" /><br><sub>XZ projection: depth dimension; both axes engaged, no degenerate planar reduction</sub></td>
+      <td align="center"><img width="430" alt="yz trace" src="results/viviani_residual_orient/plots/yz_trace.png" /><br><sub>YZ projection: target (blue) vs achieved TCP (orange) in the curve's primary plane</sub></td>
+      <td align="center"><img width="430" alt="xz trace" src="results/viviani_residual_orient/plots/xz_trace.png" /><br><sub>XZ projection: depth dimension; both axes engaged, no degenerate planar reduction</sub></td>
     </tr>
     <tr>
-      <td colspan="2" align="center"><img width="860" alt="error vs time" src="results/viviani_residual/plots/error_vs_time.png" /><br><sub>L2 tracking error across 3 trajectory periods. Steady-state (after t&gt;1 s settle window): RMS 6.43 mm, max 10.98 mm</sub></td>
+      <td align="center"><img width="430" alt="position error vs time" src="results/viviani_residual_orient/plots/error_vs_time.png" /><br><sub>Position tracking error across 3 trajectory periods. Steady-state (after t&gt;1 s settle window): RMS 0.46 mm, max 1.11 mm</sub></td>
+      <td align="center"><img width="430" alt="orientation error vs time" src="results/viviani_residual_orient/plots/orient_error_vs_time.png" /><br><sub>Orientation tracking error (geodesic angle, degrees). Steady-state RMS 19.0°, max 41° against a 60° per-period sweep</sub></td>
     </tr>
 </table>
 
-**Multi-view rollout videos** (GitHub renders these inline when viewing this README on github.com; otherwise the files are at `results/viviani_residual/videos/`)
+**Multi-view rollout videos** (files at `results/viviani_residual_orient/videos/`. The thick **magenta arrow** on the gripper shows the target orientation at each instant; the thinner **cyan arrow** shows the realised one. When tracking is perfect they overlap; the steady fan-out is the 19° RMS.)
 
 <table>
     <tr>
-      <td align="center"><video src="https://github.com/user-attachments/assets/41ab1958-120e-4922-8e05-f9c636bbf0d2" controls width="430"></video><br><sub>Side view (default eval render)</sub></td>
-      <td align="center"><video src="https://github.com/user-attachments/assets/ba58f3b6-022d-42d7-8b46-07242d0f5322" controls width="430"></video><br><sub>Front view</sub></td>
+      <td align="center"><video src="https://github.com/user-attachments/assets/41ab1958-120e-4922-8e05-f9c636bbf0d2" controls width="430"></video><br><sub>Side view — files: <code>rollout_side.mp4</code>, <code>rollout.mp4</code></sub></td>
+      <td align="center"><video src="https://github.com/user-attachments/assets/ba58f3b6-022d-42d7-8b46-07242d0f5322" controls width="430"></video><br><sub>Front view — <code>rollout_front.mp4</code></sub></td>
     </tr>
     <tr>
-      <td align="center"><video src="https://github.com/user-attachments/assets/7c8654d6-6e58-460c-8405-cb48749952ce" controls width="430"></video><br><sub>Top view (curve viewed along world −z)</sub></td>
-      <td align="center"><video src="https://github.com/user-attachments/assets/fe2bcc15-8470-4fea-a3ae-1975745a0859" controls width="430"></video><br><sub>Bottom view (curve viewed along world +z, through the table)</sub></td>
+      <td align="center"><video src="https://github.com/user-attachments/assets/7c8654d6-6e58-460c-8405-cb48749952ce" controls width="430"></video><br><sub>Top view (along world −z) — <code>rollout_top.mp4</code></sub></td>
+      <td align="center"><video src="https://github.com/user-attachments/assets/fe2bcc15-8470-4fea-a3ae-1975745a0859" controls width="430"></video><br><sub>Bottom view (through the table) — <code>rollout_bottom.mp4</code></sub></td>
     </tr>
 </table>
 
-Full numbers (end-to-end vs residual, native vs zero-shot, white vs pink noise, and use of residual for preliminary trajectories) in [`RESULTS.md`](RESULTS.md).
+> The GitHub-hosted videos in the table above are from an earlier render of the position-only baseline; the new 6-DoF rollouts (with orientation arrows) are local in `results/viviani_residual_orient/videos/`. To embed the new ones inline on github.com, drag the local `rollout_*.mp4` files into a GitHub comment or PR description and replace the `src=` URLs.
+
+Full numbers (end-to-end vs residual, position-only vs 6-DoF, native vs zero-shot, white vs pink noise) in [`RESULTS.md`](RESULTS.md).
 
 ---
 
@@ -70,50 +73,49 @@ make test        # runs the pytest suite (29 tests, ~0.5 s). Confirms env + wrap
                  # + trajectories + factory all import and behave correctly.
 ```
 
-**Run the headline experiment (residual RL on Viviani, ~25 min on an M-series Mac):**
+**Run the headline experiment (residual RL with 6-DoF tracking on Viviani, ~12 min on an M-series Mac):**
 
 ```bash
 # 1. Train. Streams PPO scalars to stdout and writes TensorBoard events:
-#       logs/tb/viviani_residual/PPO_<n>/   <- scalar curves
+#       logs/tb/viviani_residual_orient/PPO_<n>/   <- scalar curves
 #    Checkpoints written every 200k steps to:
-#       checkpoints/viviani_residual/                                      <- intermediates
-#       checkpoints/viviani_residual/best/best_model.zip                   <- best by eval
-#       checkpoints/viviani_residual/ppo_panda_final.zip                   <- final step
-uv run python scripts/train.py --config viviani_residual
+#       checkpoints/viviani_residual_orient/                                  <- intermediates
+#       checkpoints/viviani_residual_orient/best/best_model.zip               <- best by eval
+#       checkpoints/viviani_residual_orient/ppo_panda_final.zip               <- final step
+uv run python scripts/train.py --config viviani_residual_orient
 
-# 2. Evaluate. Loads ppo_panda_final.zip by default, runs a deterministic rollout
-#    for 3 trajectory periods, computes RMS/max/jerk, and writes:
-#       results/viviani_residual/plots/{yz_trace,xz_trace,error_vs_time}.png
-#       results/viviani_residual/videos/rollout.mp4                        <- side view
-uv run python scripts/eval.py --config viviani_residual
+# 2. Evaluate. Loads best/best_model.zip by default, runs a deterministic rollout
+#    for 3 trajectory periods, computes pos/orient RMS, max, jerk, and writes:
+#       results/viviani_residual_orient/plots/{yz_trace,xz_trace,error_vs_time,orient_error_vs_time,omega_vs_time}.png
+#       results/viviani_residual_orient/videos/rollout.mp4                   <- side view w/ orient arrows
+uv run python scripts/eval.py --config viviani_residual_orient
 ```
 
-You don't actually need to retrain to reproduce the headline numbers: the `viviani_residual` checkpoints (`best/best_model.zip` and `ppo_panda_final.zip`) are committed to this repo (`~4 MB`), so `uv run python scripts/eval.py --config viviani_residual` works on a fresh clone.
+You don't actually need to retrain to reproduce the headline numbers: the `viviani_residual_orient` checkpoints (`best/best_model.zip` and `ppo_panda_final.zip`) are committed to this repo (`~4 MB`), so `uv run python scripts/eval.py --config viviani_residual_orient` works on a fresh clone.
 
 **Other entry points:**
 
 ```bash
-make eval                                           # reproduces the headline 6.43 mm RMS on a fresh clone (~10 s,
-                                                    # uses committed viviani_residual best/best_model.zip)
+make eval                                           # reproduces the headline 0.46 mm / 19° on a fresh clone (~10 s,
+                                                    # uses committed viviani_residual_orient best/best_model.zip)
 make train                                          # end-to-end PPO on the circle baseline, ~7 min CPU
                                                     # (a fast smoke that the training loop works at all)
-make train-fig8 / make eval-fig8                    # 3D figure-8 variant
-uv run python scripts/tools/plot_curves.py --traj viviani_residual
+uv run python scripts/tools/plot_curves.py --traj viviani_residual_orient
                                                     # offline learning curve PNG from TB events
-uv run python scripts/tools/ablate.py --config viviani_residual
+uv run python scripts/tools/ablate.py --config viviani_residual_orient
                                                     # robustness ablation table -> results/<traj>/ablation.md
-uv run python scripts/tools/render_views.py --config viviani_residual
-                                                    # multi-view rollout (front/side/top/bottom) MP4s
+uv run python scripts/tools/render_views.py --config viviani_residual_orient
+                                                    # multi-view rollout (front/side/top/bottom) MP4s with orient arrows
 ```
 
 **Configs.** `--config <name>` accepts either:
 
-- A **bare name** like `circle`, `viviani`, `viviani_residual`. The factory resolver (`src/kinesis/envs/factory.py:load_config`) recursively searches `src/kinesis/configs/{naive,residual}/` and matches `<name>.yaml`. Available configs:
+- A **bare name** like `circle`, `viviani`, `viviani_residual_orient`. The factory resolver (`src/kinesis/envs/factory.py:load_config`) recursively searches `src/kinesis/configs/{naive,residual}/` and matches `<name>.yaml`. Available configs:
 
 | `naive/` (end-to-end PPO) | `residual/` (PPO residual on IK feedforward) |
 | --- | --- |
-| `circle`, `figure8_3d`, `viviani` | `circle_residual`, `figure8_3d_residual` |
-| `viviani_v2`, `viviani_slow`, `viviani_4m` | `viviani_residual`, `viviani_residual_pink` |
+| `circle`, `viviani` | **`viviani_residual_orient`** (headline, 6-DoF), **`circle_residual_orient`** |
+| `viviani_v2`, `viviani_slow`, `viviani_4m` | `viviani_residual` (position-only baseline), `circle_residual`, `viviani_residual_pink` |
 
 - An **explicit path**, e.g. `--config path/to/my_custom.yaml`. Useful for sweeps; copy a YAML out of `src/kinesis/configs/`, change weights, point `--config` at the copy.
 
@@ -132,7 +134,7 @@ Three options, in order of usefulness for a reviewer skimming the submission:
 
 ```bash
 # 1. Play the saved deterministic-policy video (no setup beyond `make setup`).
-open results/viviani_residual/videos/rollout.mp4
+open results/viviani_residual_orient/videos/rollout.mp4
 
 # 2. Open the robot model in MuJoCo's interactive viewer with no policy.
 #    Drag joints around, verify the URDF/assets resolved correctly.
@@ -140,9 +142,9 @@ uv run python -m mujoco.viewer --mjcf=assets/mujoco_menagerie/franka_emika_panda
 
 # 3. Run the trained policy live in a draggable viewer (best demo).
 #    `make play` handles the macOS DYLD_LIBRARY_PATH gymnastics; see below.
-make play ARGS="--config viviani_residual"
-make play ARGS="--config viviani_residual --no-wrappers"     # clean view, no noise/delay
-make play ARGS="--config viviani_residual --realtime"        # throttle to wall-clock
+make play ARGS="--config viviani_residual_orient"
+make play ARGS="--config viviani_residual_orient --no-wrappers"   # clean view, no noise/delay
+make play ARGS="--config viviani_residual_orient --realtime"      # throttle to wall-clock
 make play ARGS="--config circle --checkpoint checkpoints/circle/best/best_model.zip"
 ```
 
@@ -158,7 +160,10 @@ Per-trajectory artifacts for every variant cited in `RESULTS.md` live under `res
 .
 ├── src/kinesis/
 │   ├── envs/                # PandaTrackEnv + wrappers + config-driven factory
-│   ├── trajectories/        # one module per trajectory (circle, viviani, figure8_3d, ...)
+│   ├── trajectories/        # one module per trajectory (circle, viviani)
+│   ├── orientation/         # SO(3) helpers + look-at builder for the optional
+│   │                        #   orientation-tracking configs (kept modular so
+│   │                        #   the core env stays readable when off)
 │   └── configs/
 │       ├── naive/           # end-to-end PPO configs
 │       └── residual/        # residual RL on top of the analytic IK feedforward
@@ -209,14 +214,31 @@ r = - w_track * ||ee - target||²              # tracking
     - w_action_rate * ||a_t - a_{t-1}||²       # smoothness
     - w_qdot * ||q̇||²                          # smoothness
     + w_inband * 1[||ee - target|| < ε]        # shaping bonus
-    - w_orient * (1 - cos θ)                   # residual configs only
+    - w_orient * (1 - cos θ)                   # palm-down regulariser (legacy)
+    - w_track_R * θ_SO(3)²                     # orient configs only
+    - w_omega * ||ω_ee||²                      # orient configs only
 ```
 
-Only the first term teaches tracking; the others are smoothness and shaping. We added them one at a time in response to failure modes seen in training: `w_qdot` after the policy started chattering through high-joint-velocity configurations, `w_inband` to break a plateau where the policy parked itself ~3 cm from the target. All weights live in the YAML so retuning is a config edit, not a code edit.
+Only the first term teaches tracking; the others are smoothness and shaping. We added them one at a time in response to failure modes seen in training: `w_qdot` after the policy started chattering through high-joint-velocity configurations, `w_inband` to break a plateau where the policy parked itself ~3 cm from the target. All weights live in the YAML so retuning is a config edit, not a code edit. The last two terms only apply to `*_orient` configs (see "Orientation tracking" below).
 
 ### Trajectory representation
 
-Each trajectory is a class with one method: `target(t) -> (pos, vel)`. The policy never sees *which* trajectory, only `target_now` and the lookahead window, which is why the same `viviani_residual` checkpoint zero-shots onto the circle and the 3-D figure-eight at eval time (`RESULTS.md §2`). Three curves are implemented: `circle` (planar, baseline), `figure8_3d` (tilted Lissajous, all 7 joints engaged), and `viviani` (sphere-cylinder intersection, the headline test curve).
+Each trajectory is a class with one method: `target(t) -> (pos, vel)`. The policy never sees *which* trajectory, only `target_now` and the lookahead window, which is why the same `viviani_residual` checkpoint zero-shots onto the circle at eval time (`RESULTS.md §2`). Two curves are implemented: `circle` (planar, baseline) and `viviani` (sphere-cylinder intersection, the headline test curve — a 3-D figure-eight on a sphere that exercises all 7 arm joints).
+
+### Orientation tracking (optional brief item)
+
+The brief lists orientation tracking as optional. The `*_orient` configs add it as a *modular* layer on top of the position-tracking pipeline. Headline result (`viviani_residual_orient`): **0.46 mm steady RMS position, 19.00° RMS orientation** under σ = 2 cm + σ = 2° noise and 2-step control delay. Position is *14× tighter* than the position-only baseline (6.43 mm) on the same trajectory.
+
+The pieces:
+
+- **Trajectory API** gains `orientation(t) → R^{3×3}` and `orientation_lookahead(t, n, dt)`. Both curves use a **sinusoidal wrist roll**: `R_target(t) = R_DESIRED · R_z(A · sin(2π t / T))` with `A = π/3`. The gripper rolls ±60° about hand-z each period — a real time-varying SO(3) target (60° geodesic sweep range) that stays *well inside* Franka joint 7's ±166° range. An earlier look-at target (hand-z aimed at the curve centre, 360°/period) was abandoned: it exceeds joint 7's mechanical range, so the policy correctly refused to track it (θ_RMS stuck at ~100°). The lesson is general — reward shaping can only push as hard as the mechanism allows.
+- **Observation** gains 36 dims: the 6D continuous rotation representation (Zhou et al. 2019) of `R_ee` and `R_target(t)`, plus an SO(3) lookahead matching the position lookahead horizon. No quaternions — they double-cover; no Euler — they're discontinuous.
+- **Reward** uses the multiplicative-exponential form from arXiv:2412.03012: `r_track = w_track · r_pos · (1 + r_ori)` with `r_pos = exp(−‖err‖ / σ_p)` and `r_ori = exp(−θ / σ_R)`. Bounded in `(0, 2 · w_track]`, so PPO KL stays tame, and orientation contribution is *gated by position quality* — the policy can't trade position for orientation. An angular-rate smoothness penalty `−w_omega · ‖ω_ee‖²` mirrors the existing `w_qdot` for joints.
+- **Residual feedforward** was already 6-DoF (it had to lock orientation to break the arm's position-only null space). The only change is the target: constant `R_DESIRED` → time-varying `trajectory.orientation(t)`. Net code delta in the env: ~40 lines, all behind `include_orientation`.
+- **Robustness symmetry**: the noise wrapper gains a `σ_R = 2°` axis-angle channel mirroring its `σ = 2 cm` position channel, and the existing `ActionDelayWrapper` already delays orientation effects for free (the delay is on the action, so everything downstream inherits it). Orientation tracking is graded under the same uncertainty as position, not a softer setting.
+- **Metrics**: position RMSE / max / jerk are reported as before. New rows: steady-state orientation RMSE in degrees, steady-state max, RMS `‖ω_ee‖`, and the per-period sweep range (how many degrees the target rotates) so a 5° error against a 5° sweep is distinguishable from a banal 5° error against a 60° sweep. `scripts/eval.py --noise-off` produces the ablation row.
+
+Backwards compatibility is intact: every non-`*_orient` config is unchanged, every committed checkpoint loads against the same obs space, and `make eval` still reproduces the headline 6.43 mm / 10.98 mm / 48.8 m/s³ on `viviani_residual`.
 
 ### Evaluation methodology
 
