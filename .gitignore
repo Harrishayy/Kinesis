@@ -46,6 +46,47 @@ checkpoints/viviani_residual/*
 checkpoints/viviani_residual/best/*
 !checkpoints/viviani_residual/best/best_model.zip
 !checkpoints/viviani_residual/ppo_panda_final.zip
+# §1 end-to-end PPO ablations (circle, viviani naive + 4M, slow, v2) and
+# §4 noise-color pink-trained variant. Best/best_model.zip + ppo_panda_final.zip
+# for each so `eval.py --config <name>` reproduces RESULTS.md numbers without
+# retraining. Small configs (net_arch=[64,64], ~206 KB each) and the two
+# larger ones (net_arch=[256,256], ~2 MB each) add ~10 MB total.
+!checkpoints/circle/
+checkpoints/circle/*
+!checkpoints/circle/best/
+checkpoints/circle/best/*
+!checkpoints/circle/best/best_model.zip
+!checkpoints/circle/ppo_panda_final.zip
+!checkpoints/viviani/
+checkpoints/viviani/*
+!checkpoints/viviani/best/
+checkpoints/viviani/best/*
+!checkpoints/viviani/best/best_model.zip
+!checkpoints/viviani/ppo_panda_final.zip
+!checkpoints/viviani_4m/
+checkpoints/viviani_4m/*
+!checkpoints/viviani_4m/best/
+checkpoints/viviani_4m/best/*
+!checkpoints/viviani_4m/best/best_model.zip
+!checkpoints/viviani_4m/ppo_panda_final.zip
+!checkpoints/viviani_slow/
+checkpoints/viviani_slow/*
+!checkpoints/viviani_slow/best/
+checkpoints/viviani_slow/best/*
+!checkpoints/viviani_slow/best/best_model.zip
+!checkpoints/viviani_slow/ppo_panda_final.zip
+!checkpoints/viviani_v2/
+checkpoints/viviani_v2/*
+!checkpoints/viviani_v2/best/
+checkpoints/viviani_v2/best/*
+!checkpoints/viviani_v2/best/best_model.zip
+!checkpoints/viviani_v2/ppo_panda_final.zip
+!checkpoints/viviani_residual_pink/
+checkpoints/viviani_residual_pink/*
+!checkpoints/viviani_residual_pink/best/
+checkpoints/viviani_residual_pink/best/*
+!checkpoints/viviani_residual_pink/best/best_model.zip
+!checkpoints/viviani_residual_pink/ppo_panda_final.zip
 
 # === Results — keep only curated finals ===
 results/raw/
