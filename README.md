@@ -6,7 +6,7 @@
 
 End-effector **6-DoF tracking** (position + orientation) for the **Franka Emika Panda** in MuJoCo, learned with PPO under observation noise and control delay on both channels.
 
-The headline result is **residual RL on top of a damped-least-squares Jacobian-pseudoinverse IK feedforward**: the policy never has to re-learn kinematics, it learns a residual that compensates for delay, noise, and dynamics. On a Viviani curve (a 3-D figure-eight on a sphere) with a sinusoidal wrist-roll orientation target, the residual policy reaches **0.46 mm steady-state position RMS / 19.0° steady-state orientation RMS** under σ = 2 cm position noise, σ = 2° rotation noise, and 2-step (40 ms) control delay. The internal target for this project — sub-1 cm position RMS — is cleared by **21×**, and the optional orientation-tracking item from the brief is delivered with a meaningful working metric (60° per-period sweep, tracked to 19° steady error).
+The headline result is **residual RL on top of a damped-least-squares Jacobian-pseudoinverse IK feedforward**: the policy never has to re-learn kinematics, it learns a residual that compensates for delay, noise, and dynamics. On a Viviani curve (a 3-D figure-eight on a sphere) with a sinusoidal wrist-roll orientation target, the residual policy reaches **0.46 mm steady-state position RMS / 19.0° steady-state orientation RMS** under σ = 2 cm position noise, σ = 2° rotation noise, and 2-step (40 ms) control delay. The internal target for this project (sub-5 mm position RMS is cleared easily), and the optional orientation-tracking item from the brief is delivered with a meaningful working metric (60° per-period sweep, tracked to 19° steady error).
 
 ## Evidence
 
@@ -29,12 +29,12 @@ The `viviani_residual_orient` policy tracking its native curve under the trainin
 
 <table>
     <tr>
-      <td align="center"><video src="https://github.com/user-attachments/assets/41ab1958-120e-4922-8e05-f9c636bbf0d2" controls width="430"></video><br><sub>Side view — files: <code>rollout_side.mp4</code>, <code>rollout.mp4</code></sub></td>
-      <td align="center"><video src="https://github.com/user-attachments/assets/ba58f3b6-022d-42d7-8b46-07242d0f5322" controls width="430"></video><br><sub>Front view — <code>rollout_front.mp4</code></sub></td>
+      <td align="center"><video src="https://github.com/user-attachments/assets/24325c59-484a-4e37-8cb6-4538689bface" controls width="430"></video><br><sub>Side view — files: <code>rollout_side.mp4</code>, <code>rollout.mp4</code></sub></td>
+      <td align="center"><video src="https://github.com/user-attachments/assets/14ca34fd-f4d4-4dbf-9115-30b4be8cdc04" controls width="430"></video><br><sub>Front view — <code>rollout_front.mp4</code></sub></td>
     </tr>
     <tr>
-      <td align="center"><video src="https://github.com/user-attachments/assets/7c8654d6-6e58-460c-8405-cb48749952ce" controls width="430"></video><br><sub>Top view (along world −z) — <code>rollout_top.mp4</code></sub></td>
-      <td align="center"><video src="https://github.com/user-attachments/assets/fe2bcc15-8470-4fea-a3ae-1975745a0859" controls width="430"></video><br><sub>Bottom view (through the table) — <code>rollout_bottom.mp4</code></sub></td>
+      <td align="center"><video src="https://github.com/user-attachments/assets/e793876c-d293-4765-ad43-652fb1e7fda5" controls width="430"></video><br><sub>Top view (along world −z) — <code>rollout_top.mp4</code></sub></td>
+      <td align="center"><video src="https://github.com/user-attachments/assets/455c82fd-6978-40c3-8f3e-4668dfc518cc" controls width="430"></video><br><sub>Bottom view (through the table) — <code>rollout_bottom.mp4</code></sub></td>
     </tr>
 </table>
 
