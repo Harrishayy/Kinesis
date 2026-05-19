@@ -10,7 +10,6 @@ from kinesis.orientation import (
     exp_so3,
     geodesic_angle,
     log_so3,
-    look_at_R,
     R_to_6d,
 )
 
@@ -119,35 +118,6 @@ def test_R_to_6d_shape_and_round_trip():
     c_unit = np.cross(a_unit, b_unit)
     R_back = np.column_stack([a_unit, b_unit, c_unit])
     assert np.allclose(R_back, R, atol=1e-9)
-
-
-def test_look_at_R_is_valid_so3():
-    R = look_at_R(
-        pos=np.array([0.5, 0.15, 0.4]),
-        anchor=np.array([0.5, 0.0, 0.4]),
-        up_axis=np.array([1.0, 0.0, 0.0]),
-    )
-    assert _is_so3(R, atol=1e-9)
-
-
-def test_look_at_R_z_axis_points_at_anchor():
-    pos = np.array([0.5, 0.15, 0.4])
-    anchor = np.array([0.5, 0.0, 0.4])
-    R = look_at_R(pos=pos, anchor=anchor, up_axis=np.array([1.0, 0.0, 0.0]))
-    # hand-z is the third column of R; should equal unit(anchor − pos).
-    expected_z = anchor - pos
-    expected_z /= np.linalg.norm(expected_z)
-    assert np.allclose(R[:, 2], expected_z, atol=1e-9)
-
-
-def test_look_at_R_degenerate_returns_identity():
-    # Look-at direction is zero → identity fallback.
-    R = look_at_R(
-        pos=np.array([0.5, 0.0, 0.4]),
-        anchor=np.array([0.5, 0.0, 0.4]),
-        up_axis=np.array([1.0, 0.0, 0.0]),
-    )
-    assert np.allclose(R, np.eye(3))
 
 
 def test_R_desired_is_valid_so3():

@@ -138,35 +138,3 @@ def wrist_roll_R(t: float, period_s: float, amplitude_rad: float) -> np.ndarray:
     return R_DESIRED @ R_z
 
 
-def look_at_R(pos: np.ndarray, anchor: np.ndarray, up_axis: np.ndarray) -> np.ndarray:
-    """Rotation that points hand-z from `pos` toward `anchor`, with `up_axis`
-    fixing the remaining DoF.
-
-    hand-z = unit(anchor − pos)
-    hand-y = unit(up_axis projected orthogonal to hand-z)  (Gram-Schmidt)
-    hand-x = hand-y × hand-z
-
-    Returns a constant when the look-at direction is degenerate (zero length)
-    or parallel to `up_axis` — caller should pick a non-degenerate `up_axis`
-    for the trajectory; circle/Viviani are validated in unit tests.
-    """
-    pos = np.asarray(pos, dtype=np.float64).reshape(3)
-    anchor = np.asarray(anchor, dtype=np.float64).reshape(3)
-    up = np.asarray(up_axis, dtype=np.float64).reshape(3)
-
-    z = anchor - pos
-    z_norm = float(np.linalg.norm(z))
-    if z_norm < _EPS:
-        return np.eye(3)
-    z = z / z_norm
-
-    up_proj = up - (up @ z) * z
-    up_norm = float(np.linalg.norm(up_proj))
-    if up_norm < _EPS:
-        # `up_axis` is parallel to the look-at direction; fall back to identity
-        # rather than silently returning a malformed frame.
-        return np.eye(3)
-    y = up_proj / up_norm
-    x = np.cross(y, z)
-
-    return np.column_stack([x, y, z])

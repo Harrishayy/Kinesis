@@ -6,7 +6,7 @@
 
 End-effector **6-DoF tracking** (position + orientation) for the **Franka Emika Panda** in MuJoCo, learned with PPO under observation noise and control delay on both channels.
 
-The headline result is **residual RL on top of a damped-least-squares Jacobian-pseudoinverse IK feedforward**: the policy never has to re-learn kinematics, it learns a residual that compensates for delay, noise, and dynamics. On a Viviani curve (a 3-D figure-eight on a sphere) with a sinusoidal wrist-roll orientation target, the residual policy reaches **0.46 mm steady-state position RMS / 19.0° steady-state orientation RMS** under σ = 2 cm position noise, σ = 2° rotation noise, and 2-step (40 ms) control delay. The internal target for this project (sub-5 mm position RMS is cleared easily), and the optional orientation-tracking item from the brief is delivered with a meaningful working metric (60° per-period sweep, tracked to 19° steady error).
+The headline result is **residual RL on top of a damped-least-squares Jacobian-pseudoinverse IK feedforward**: the policy never has to re-learn kinematics, it learns a residual that compensates for delay, noise, and dynamics. On a Viviani curve (a 3-D figure-eight on a sphere) with a sinusoidal wrist-roll orientation target, the residual policy reaches **0.46 mm steady-state position RMS / 19.0° steady-state orientation RMS** under σ = 2 cm position noise, σ = 2° rotation noise, and 2-step (40 ms) control delay. The internal sub-5 mm position-RMS bar is cleared by an order of magnitude, and the optional orientation-tracking item from the brief is delivered with a meaningful working metric (60° per-period sweep, tracked to 19° steady error).
 
 ## Evidence
 
@@ -38,7 +38,6 @@ The `viviani_residual_orient` policy tracking its native curve under the trainin
     </tr>
 </table>
 
-> The GitHub-hosted videos in the table above are from an earlier render of the position-only baseline; the new 6-DoF rollouts (with orientation arrows) are local in `results/viviani_residual_orient/videos/`. To embed the new ones inline on github.com, drag the local `rollout_*.mp4` files into a GitHub comment or PR description and replace the `src=` URLs.
 
 Full numbers (end-to-end vs residual, position-only vs 6-DoF, native vs zero-shot, white vs pink noise) in [`RESULTS.md`](RESULTS.md).
 
@@ -69,8 +68,8 @@ git clone https://github.com/Harrishayy/Kinesis.git
 cd Kinesis
 make setup       # creates .venv (Python 3.11), `uv pip install -e .[dev]`, pulls the
                  # mujoco_menagerie submodule, installs pre-commit. ~2 min first time.
-make test        # runs the pytest suite (29 tests, ~0.5 s). Confirms env + wrappers
-                 # + trajectories + factory all import and behave correctly.
+make test        # runs the pytest suite (52 tests, ~0.6 s). Confirms env + wrappers
+                 # + trajectories + orientation + factory all import and behave correctly.
 ```
 
 **Run the headline experiment (residual RL with 6-DoF tracking on Viviani, ~12 min on an M-series Mac):**
@@ -161,9 +160,9 @@ Per-trajectory artifacts for every variant cited in `RESULTS.md` live under `res
 ├── src/kinesis/
 │   ├── envs/                # PandaTrackEnv + wrappers + config-driven factory
 │   ├── trajectories/        # one module per trajectory (circle, viviani)
-│   ├── orientation/         # SO(3) helpers + look-at builder for the optional
-│   │                        #   orientation-tracking configs (kept modular so
-│   │                        #   the core env stays readable when off)
+│   ├── orientation/         # SO(3) helpers + wrist-roll target builder for the
+│   │                        #   optional orientation-tracking configs (kept
+│   │                        #   modular so the core env stays readable when off)
 │   └── configs/
 │       ├── naive/           # end-to-end PPO configs
 │       └── residual/        # residual RL on top of the analytic IK feedforward
@@ -195,7 +194,7 @@ The feedforward (a 6-DoF position + orientation IK) carries everything kinematic
 **Evolution of the residual config.** This was reached in two stages, which is worth being upfront about:
 
 1. *Position-only baseline* (`viviani_residual`, `RESULTS.md §3`). Quadratic position reward `−w · err²`, FF orientation locked to a constant palm-down pose. **6.43 mm steady RMS**. Cleanly beat every end-to-end variant on the same curve at the same compute (best end-to-end: 8.40 mm), with action jerk dropping ~4× from 188 m/s³ to 49 m/s³ because the feedforward's analytic smoothness shows through into the total action.
-2. *6-DoF with the bounded multiplicative-exp reward* (`viviani_residual_orient`, `RESULTS.md §2` — the current headline). Switched the position reward to `w · exp(−err/σ_p) · (1 + r_ori)` from arXiv:2412.03012, added time-varying `R_target(t)` to both the FF and the reward, added orientation noise on the obs to match the position-noise channel. **0.46 mm steady position RMS, 19.0° orientation RMS** under the same uncertainty. The quadratic reward's gradient goes to zero at zero error, so the policy stops getting signal once it's within a few mm — the exponential form keeps a non-vanishing gradient all the way down. Most of the 6.43 → 0.46 mm position improvement is that reward shape change, not the orientation work itself; the orientation work delivers the optional brief item alongside.
+2. *6-DoF with the bounded multiplicative-exp reward* (`viviani_residual_orient`, `RESULTS.md §2` — the current headline). Switched the position reward to `w · exp(−err/σ_p) · (1 + r_ori)` from Jiang et al. 2024 [[2]](#references), added time-varying `R_target(t)` to both the FF and the reward, added orientation noise on the obs to match the position-noise channel. **0.46 mm steady position RMS, 19.0° orientation RMS** under the same uncertainty. The quadratic reward's gradient goes to zero at zero error, so the policy stops getting signal once it's within a few mm — the exponential form keeps a non-vanishing gradient all the way down. Most of the 6.43 → 0.46 mm position improvement is that reward shape change, not the orientation work itself; the orientation work delivers the optional brief item alongside.
 
 The brief explicitly rewards creative solutions over "standard" tracking RL. The standard solution is to throw PPO at the whole problem; the more interesting solution is to figure out which part of the problem doesn't need RL at all and hand that part off — then to recognise when the chosen reward shape is itself the bottleneck and replace it. The remaining subsections describe the state, action, reward, and evaluation choices that make this work in practice.
 
@@ -224,7 +223,7 @@ r = - w_track * ||ee - target||²              # tracking
     - w_orient * (1 - cos θ_palm_down)         # palm-down regulariser
 ```
 
-The 6-DoF headline (`viviani_residual_orient`, §2) replaces the tracking + inband terms with the **bounded multiplicative-exponential** form from arXiv:2412.03012, adds an orientation channel that's gated by position quality, and an angular-rate smoothness term mirroring `w_qdot`:
+The 6-DoF headline (`viviani_residual_orient`, §2) replaces the tracking + inband terms with the **bounded multiplicative-exponential** form from Jiang et al. 2024 [[2]](#references), adds an orientation channel that's gated by position quality, and an angular-rate smoothness term mirroring `w_qdot`:
 
 ```
 r_pos    = exp(- ||ee - target|| / σ_p)        # σ_p = 5 cm
@@ -249,8 +248,8 @@ The brief lists orientation tracking as optional. The `*_orient` configs add it 
 The pieces:
 
 - **Trajectory API** gains `orientation(t) → R^{3×3}` and `orientation_lookahead(t, n, dt)`. Both curves use a **sinusoidal wrist roll**: `R_target(t) = R_DESIRED · R_z(A · sin(2π t / T))` with `A = π/3`. The gripper rolls ±60° about hand-z each period — a real time-varying SO(3) target (60° geodesic sweep range) that stays *well inside* Franka joint 7's ±166° range. An earlier look-at target (hand-z aimed at the curve centre, 360°/period) was abandoned: it exceeds joint 7's mechanical range, so the policy correctly refused to track it (θ_RMS stuck at ~100°). The lesson is general — reward shaping can only push as hard as the mechanism allows.
-- **Observation** gains 36 dims: the 6D continuous rotation representation (Zhou et al. 2019) of `R_ee` and `R_target(t)`, plus an SO(3) lookahead matching the position lookahead horizon. No quaternions — they double-cover; no Euler — they're discontinuous.
-- **Reward** uses the multiplicative-exponential form from arXiv:2412.03012: `r_track = w_track · r_pos · (1 + r_ori)` with `r_pos = exp(−‖err‖ / σ_p)` and `r_ori = exp(−θ / σ_R)`. Bounded in `(0, 2 · w_track]`, so PPO KL stays tame, and orientation contribution is *gated by position quality* — the policy can't trade position for orientation. An angular-rate smoothness penalty `−w_omega · ‖ω_ee‖²` mirrors the existing `w_qdot` for joints.
+- **Observation** gains 36 dims: the 6D continuous rotation representation from Zhou et al. 2019 [[3]](#references) for `R_ee` and `R_target(t)`, plus an SO(3) lookahead matching the position lookahead horizon. No quaternions — they double-cover; no Euler — they're discontinuous.
+- **Reward** uses the multiplicative-exponential form from Jiang et al. 2024 [[2]](#references): `r_track = w_track · r_pos · (1 + r_ori)` with `r_pos = exp(−‖err‖ / σ_p)` and `r_ori = exp(−θ / σ_R)`. Bounded in `(0, 2 · w_track]`, so PPO KL stays tame, and orientation contribution is *gated by position quality* — the policy can't trade position for orientation. An angular-rate smoothness penalty `−w_omega · ‖ω_ee‖²` mirrors the existing `w_qdot` for joints.
 - **Residual feedforward** was already 6-DoF (it had to lock orientation to break the arm's position-only null space). The only change is the target: constant `R_DESIRED` → time-varying `trajectory.orientation(t)`. Net code delta in the env: ~40 lines, all behind `include_orientation`.
 - **Robustness symmetry**: the noise wrapper gains a `σ_R = 2°` axis-angle channel mirroring its `σ = 2 cm` position channel, and the existing `ActionDelayWrapper` already delays orientation effects for free (the delay is on the action, so everything downstream inherits it). Orientation tracking is graded under the same uncertainty as position, not a softer setting.
 - **Metrics**: position RMSE / max / jerk are reported as before. New rows: steady-state orientation RMSE in degrees, steady-state max, RMS `‖ω_ee‖`, and the per-period sweep range (how many degrees the target rotates) so a 5° error against a 5° sweep is distinguishable from a banal 5° error against a 60° sweep. `scripts/eval.py --noise-off` produces the ablation row.
@@ -284,6 +283,10 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, testing, and code-style note
 ## References
 
 [1] Johannink, T., Bahl, S., Nair, A., Luo, J., Kumar, A., Loskyll, M., Aparicio Ojea, J., Solowjow, E., & Levine, S. (2018). *Residual Reinforcement Learning for Robot Control.* arXiv:1812.03201. [PDF](https://arxiv.org/pdf/1812.03201). Introduces the `u = u_H(s) + π_θ(s)` decomposition used in this project's residual configs. Their `u_H` is a hand-coded controller; here it is specialised to an analytic damped-least-squares Jacobian-pseudoinverse IK feedforward.
+
+[2] Jiang, K., Fu, Z., Guo, J., Zhang, W., & Chen, H. (2024). *Learning Whole-Body Loco-Manipulation for Omni-Directional Task Space Pose Tracking with a Wheeled-Quadrupedal-Manipulator.* arXiv:2412.03012. [PDF](https://arxiv.org/pdf/2412.03012). Source of the bounded multiplicative-exponential 6-DoF tracking reward `r_track = w_track · exp(−‖p* − p‖/σ_p) · (1 + exp(−‖log(R* Rᵀ)‖_F/σ_R))` used by the `*_orient` configs in `RESULTS.md §2`. Their multiplicative gating (position quality scales the orientation contribution) is what keeps PPO stable in the 6-DoF setting and removes the unbounded-gradient failure mode that broke the first 6-DoF attempt in this project.
+
+[3] Zhou, Y., Barnes, C., Lu, J., Yang, J., & Li, H. (2019). *On the Continuity of Rotation Representations in Neural Networks.* CVPR 2019, arXiv:1812.07035. [PDF](https://arxiv.org/pdf/1812.07035). Establishes that quaternions and Euler angles are discontinuous as rotation inputs to neural networks (quaternion double-cover causes exploding gradients across SO(3)) and proposes the **6D continuous representation** — the first two columns of the rotation matrix — used here for `R_ee` and `R_target` in the policy's observation block.
 
 ## License
 

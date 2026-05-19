@@ -53,7 +53,7 @@ simpler curve (cleared by 50×).
 
 The earlier position-only residual baseline (§3, `viviani_residual`,
 6.43 mm) used a quadratic position reward; switching to the bounded
-multiplicative-exp form from arXiv:2412.03012 *while* extending the env
+multiplicative-exp form from Jiang et al. 2024 (arXiv:2412.03012) *while* extending the env
 to 6-DoF tracking accounts for most of the position improvement (6.43 →
 0.46 mm). The orientation contribution is a separate, smaller win on
 top — the optional brief item delivered with a working 19° steady RMS
@@ -102,7 +102,7 @@ noise + 2-step delay on all of it.
 ### Reward design
 
 The 6-DoF configs use the bounded **multiplicative-exponential** form from
-arXiv:2412.03012 — position and orientation contributions are multiplied,
+Jiang et al. 2024 (arXiv:2412.03012) — position and orientation contributions are multiplied,
 so orientation reward is automatically gated by position quality:
 
 ```
@@ -238,7 +238,20 @@ uv run python scripts/train.py  --config <name>                            # ret
 Configs in `src/kinesis/configs/{naive,residual}/` (the `--config` resolver
 searches both subdirs, so a bare name like `viviani_residual_orient` works).
 Checkpoints (best-by-eval) in `checkpoints/<name>/best/best_model.zip`.
-Plots in `results/<name>/plots/`, videos in `results/<name>/videos/`. The
-headline `viviani_residual_orient` checkpoint and full multi-view video set
-are committed to the repo (~3 MB) — `make eval` reproduces the §2 numbers
-on a fresh clone in ~10 s with no training needed.
+Plots in `results/<name>/plots/`, videos in `results/<name>/videos/`.
+
+**Committed checkpoints — every numbered row in this document is
+reproducible without retraining:**
+
+| Section | Config | Reproduces |
+|---|---|---|
+| §1 | `circle`, `viviani`, `viviani_4m`, `viviani_slow`, `viviani_v2` | end-to-end PPO baselines |
+| §2 | `viviani_residual_orient`, `circle_residual_orient` | 6-DoF tracking headline |
+| §3 | `viviani_residual` | position-only residual baseline |
+| §4 | `viviani_residual`, `viviani_residual_pink` | noise-color robustness |
+
+Each contributes `best/best_model.zip` + `ppo_panda_final.zip` (~206 KB
+each for the [64,64] configs, ~2 MB each for the [256,256] configs). Total
+committed checkpoint footprint: ~22 MB. `make eval` runs the §2 headline
+in ~10 s on a fresh clone; the other configs reproduce with
+`uv run python scripts/eval.py --config <name>`.
